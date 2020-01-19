@@ -16,11 +16,15 @@ entity gba_dma is
       
       gb_bus              : inout proc_bus_gb_type := ((others => 'Z'), (others => 'Z'), (others => 'Z'), 'Z', 'Z', 'Z', "ZZ", "ZZZZ", 'Z');
       
+      new_cycles          : in    unsigned(7 downto 0);
+      new_cycles_valid    : in    std_logic;
+      
       IRP_DMA             : out   std_logic_vector(3 downto 0);
       
       dma_on              : out   std_logic;
       CPU_bus_idle        : in    std_logic;
       do_step             : in    std_logic;
+      dma_soon            : out   std_logic;
       
       sound_dma_req       : in    std_logic_vector(1 downto 0);
       hblank_trigger      : in    std_logic;
@@ -40,6 +44,7 @@ entity gba_dma is
       dma_bus_dout        : out    std_logic_vector(31 downto 0);
       dma_bus_din         : in     std_logic_vector(31 downto 0);
       dma_bus_done        : in     std_logic;
+      dma_bus_unread      : in     std_logic;
       
       debug_dma           : out   std_logic_vector(31 downto 0)
    );
@@ -69,6 +74,7 @@ architecture arch of gba_dma is
              
    signal single_dma_on   : std_logic_vector(3 downto 0);
    signal single_allow_on : std_logic_vector(3 downto 0);
+   signal single_soon     : std_logic_vector(3 downto 0);
    
    signal dma_switch : integer range 0 to 3 := 0; 
    
@@ -115,11 +121,15 @@ begin
       loading_savestate => loading_savestate,
       
       gb_bus            => gb_bus,
+      
+      new_cycles        => new_cycles,      
+      new_cycles_valid  => new_cycles_valid,
                         
       IRP_DMA           => IRP_DMA(0),
                         
       dma_on            => single_dma_on(0),
       allow_on          => single_allow_on(0),
+      dma_soon          => single_soon(0),
                         
       sound_dma_req     => '0', 
       hblank_trigger    => hblank_trigger,
@@ -143,6 +153,7 @@ begin
       dma_bus_dout      => Array_Dout(0), 
       dma_bus_din       => dma_bus_din,
       dma_bus_done      => Array_done(0),
+      dma_bus_unread    => dma_bus_unread,
       
       is_idle           => single_is_idle(0)
    );
@@ -173,11 +184,15 @@ begin
       loading_savestate => loading_savestate,
       
       gb_bus            => gb_bus,
+      
+      new_cycles        => new_cycles,      
+      new_cycles_valid  => new_cycles_valid,
                         
       IRP_DMA           => IRP_DMA(1),
                         
       dma_on            => single_dma_on(1),
       allow_on          => single_allow_on(1),
+      dma_soon          => single_soon(1),
                         
       sound_dma_req     => sound_dma_req(0), 
       hblank_trigger    => hblank_trigger,
@@ -201,6 +216,7 @@ begin
       dma_bus_dout      => Array_Dout(1), 
       dma_bus_din       => dma_bus_din,
       dma_bus_done      => Array_done(1),
+      dma_bus_unread    => dma_bus_unread,
       
       is_idle           => single_is_idle(1)
    );
@@ -231,11 +247,15 @@ begin
       loading_savestate => loading_savestate,
       
       gb_bus            => gb_bus,
+      
+      new_cycles        => new_cycles,      
+      new_cycles_valid  => new_cycles_valid,
                         
       IRP_DMA           => IRP_DMA(2),
                         
       dma_on            => single_dma_on(2),
       allow_on          => single_allow_on(2),
+      dma_soon          => single_soon(2),
                         
       sound_dma_req     => sound_dma_req(1), 
       hblank_trigger    => hblank_trigger,
@@ -259,6 +279,7 @@ begin
       dma_bus_dout      => Array_Dout(2), 
       dma_bus_din       => dma_bus_din,
       dma_bus_done      => Array_done(2),
+      dma_bus_unread    => dma_bus_unread,
       
       is_idle           => single_is_idle(2)
    );
@@ -289,11 +310,15 @@ begin
       loading_savestate => loading_savestate,      
       
       gb_bus            => gb_bus,
+      
+      new_cycles        => new_cycles,      
+      new_cycles_valid  => new_cycles_valid,
          
       IRP_DMA           => IRP_DMA(3),
                         
       dma_on            => single_dma_on(3),
       allow_on          => single_allow_on(3),
+      dma_soon          => single_soon(3),
                         
       sound_dma_req     => '0', 
       hblank_trigger    => hblank_trigger,
@@ -317,6 +342,7 @@ begin
       dma_bus_dout      => Array_Dout(3), 
       dma_bus_din       => dma_bus_din,
       dma_bus_done      => Array_done(3),
+      dma_bus_unread    => dma_bus_unread,
       
       is_idle           => single_is_idle(3)
    );
@@ -343,7 +369,8 @@ begin
    dma_dword_cycles <= single_dword_cycles(0)          or single_dword_cycles(1)          or single_dword_cycles(2)           or single_dword_cycles(3);
    dma_cycles_adrup <= single_cycles_adrup(3 downto 0) or single_cycles_adrup(7 downto 4) or single_cycles_adrup(11 downto 8) or single_cycles_adrup(15 downto 12);
    
-   dma_on <= single_dma_on(0) or single_dma_on(1) or  single_dma_on(2) or single_dma_on(3);
+   dma_on   <= single_dma_on(0) or single_dma_on(1) or  single_dma_on(2) or single_dma_on(3);
+   dma_soon <= single_soon(0)   or single_soon(1)   or  single_soon(2)   or single_soon(3);
    
    process (clk100)
    begin

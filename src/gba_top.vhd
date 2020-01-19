@@ -33,6 +33,15 @@ entity gba_top is
       save_state         : in     std_logic;
       load_state         : in     std_logic;
       interframe_blend   : in     std_logic;
+      maxpixels          : in     std_logic;                    -- limit pixels per line
+      shade_mode         : in     std_logic_vector(2 downto 0); -- 0 = off, 1..4 modes
+      specialmodule      : in     std_logic;                    -- 0 = off, 1 = use gamepak GPIO Port at address 0x080000C4..0x080000C8
+      -- cheats
+      cheat_clear        : in     std_logic;
+      cheats_enabled     : in     std_logic;
+      cheat_on           : in     std_logic;
+      cheat_in           : in     std_logic_vector(127 downto 0);
+      cheats_active      : out    std_logic := '0';
       -- sdram interface
       sdram_read_ena     : out    std_logic;                     -- triggered once for read request 
       sdram_read_done    : in     std_logic := '0';              -- must be triggered once when sdram_read_data is valid after last read
@@ -62,6 +71,7 @@ entity gba_top is
       save_eeprom        : out    std_logic;
       save_sram          : out    std_logic;
       save_flash         : out    std_logic;
+      load_done          : out    std_logic;                     -- savestate successfully loaded
       -- Keys - all active high   
       KeyA               : in     std_logic; 
       KeyB               : in     std_logic;
@@ -84,7 +94,7 @@ entity gba_top is
       pixel_out_x        : out   integer range 0 to 239;
       pixel_out_y        : out   integer range 0 to 159;
       pixel_out_addr     : out   integer range 0 to 38399;       -- address for framebuffer 
-      pixel_out_data     : out   std_logic_vector(14 downto 0);  -- RGB data for framebuffer 
+      pixel_out_data     : out   std_logic_vector(17 downto 0);  -- RGB data for framebuffer 
       pixel_out_we       : out   std_logic;                      -- new pixel for framebuffer 
       -- sound                            
       sound_out_left     : out   std_logic_vector(15 downto 0) := (others => '0');
@@ -117,7 +127,7 @@ architecture arch of gba_top is
    signal SAVE_BusRnW          : std_logic;
    signal SAVE_BusACC          : std_logic_vector(1 downto 0);
    signal SAVE_BusWriteData    : std_logic_vector(31 downto 0);
-   signal SAVE_Bus_ena         : std_logic := '0';
+   signal SAVE_Bus_ena         : std_logic;
    
    signal savestate_bus        : proc_bus_gb_type;
    signal reset                : std_logic;
@@ -126,6 +136,15 @@ architecture arch of gba_top is
    signal sleep_savestate      : std_logic;
    
    signal cpu_jump             : std_logic;
+   
+   -- cheats
+   signal Cheats_BusAddr       : std_logic_vector(27 downto 0);
+   signal Cheats_BusRnW        : std_logic;
+   signal Cheats_BusACC        : std_logic_vector(1 downto 0);
+   signal Cheats_BusWriteData  : std_logic_vector(31 downto 0);
+   signal Cheats_Bus_ena       : std_logic := '0';
+   
+   signal sleep_cheats         : std_logic;
    
    -- wiring  
    signal cpu_bus_Adr          : std_logic_vector(31 downto 0);
@@ -143,6 +162,7 @@ architecture arch of gba_top is
    signal dma_bus_dout         : std_logic_vector(31 downto 0);
    signal dma_bus_din          : std_logic_vector(31 downto 0);
    signal dma_bus_done         : std_logic;
+   signal dma_bus_unread       : std_logic;
    
    signal mem_bus_Adr          : std_logic_vector(31 downto 0);
    signal mem_bus_rnw          : std_logic;
@@ -151,8 +171,13 @@ architecture arch of gba_top is
    signal mem_bus_dout         : std_logic_vector(31 downto 0);
    signal mem_bus_din          : std_logic_vector(31 downto 0);
    signal mem_bus_done         : std_logic;
+   signal mem_bus_unread       : std_logic;
    
    signal bus_lowbits          : std_logic_vector(1 downto 0); -- only required for sram access
+                                          
+   signal settle               : std_logic;
+   
+   signal bitmapdrawmode       : std_logic;
                                
    signal VRAM_Lo_addr         : integer range 0 to 16383;
    signal VRAM_Lo_datain       : std_logic_vector(31 downto 0);
@@ -179,6 +204,13 @@ architecture arch of gba_top is
    signal PALETTE_OAM_dataout  : std_logic_vector(31 downto 0);
    signal PALETTE_OAM_we       : std_logic_vector(3 downto 0);
    
+   signal GPIO_done            : std_logic;
+   signal GPIO_readEna         : std_logic;
+   signal GPIO_Din             : std_logic_vector(3 downto 0);
+   signal GPIO_Dout            : std_logic_vector(3 downto 0);
+   signal GPIO_writeEna        : std_logic;
+   signal GPIO_addr            : std_logic_vector(1 downto 0);
+   
    signal gbaon                : std_logic := '0';
    signal gpu_out_active       : std_logic;
    
@@ -187,6 +219,7 @@ architecture arch of gba_top is
    
    signal dma_on         : std_logic;
    signal CPU_bus_idle   : std_logic;
+   signal dma_soon       : std_logic;
    
    signal dma_new_cycles   : std_logic; 
    signal dma_first_cycles : std_logic;
@@ -265,7 +298,18 @@ begin
 
    -- dummy modules
    igba_reservedregs : entity work.gba_reservedregs port map ( clk100, gb_bus);
-   igba_serial       : entity work.gba_serial       port map ( clk100, gb_bus);
+   
+   igba_serial       : entity work.gba_serial       
+   port map 
+   ( 
+      clk100            => clk100,
+      gb_bus            => gb_bus,
+      
+      new_cycles        => new_cycles,      
+      new_cycles_valid  => new_cycles_valid,
+                         
+      IRP_Serial        => IRP_Serial
+   );
    
    -- real modules
    igba_joypad : entity work.gba_joypad
@@ -315,6 +359,13 @@ begin
             debug_bus_ena    <= '1';
             debug_bus_acc    <= SAVE_BusACC;
             debug_bus_dout   <= SAVE_BusWriteData;
+         elsif (Cheats_Bus_ena = '1') then
+            debug_bus_active <= '1';
+            debug_bus_Adr    <= Cheats_BusAddr;
+            debug_bus_rnw    <= Cheats_BusRnW;
+            debug_bus_ena    <= '1';
+            debug_bus_acc    <= Cheats_BusACC;
+            debug_bus_dout   <= Cheats_BusWriteData;
          end if;
          
          if (debug_bus_active = '1' and mem_bus_done = '1') then
@@ -325,8 +376,9 @@ begin
       end if;
    end process;
    
-   dma_bus_din  <= mem_bus_din;
-   dma_bus_done <= mem_bus_done;
+   dma_bus_din    <= mem_bus_din;
+   dma_bus_done   <= mem_bus_done;
+   dma_bus_unread <= mem_bus_unread;
    
    cpu_bus_din  <= mem_bus_din;
    cpu_bus_done <= mem_bus_done;
@@ -345,6 +397,8 @@ begin
       clk100              => clk100,
       gb_on               => gbaon,
       reset               => reset,
+      
+      load_done           => load_done,
                         
       save                => save_state,
       load                => load_state,
@@ -374,6 +428,45 @@ begin
       bus_out_ena         => SAVE_out_ena,   
       bus_out_active      => SAVE_out_active,
       bus_out_done        => SAVE_out_done  
+   );
+   
+   igba_cheats : entity work.gba_cheats
+   port map
+   (
+      clk100         => clk100,
+      gb_on          => GBA_on,
+                      
+      cheat_clear    => cheat_clear,
+      cheats_enabled => cheats_enabled,
+      cheat_on       => cheat_on,
+      cheat_in       => cheat_in,
+      cheats_active  => cheats_active,
+                     
+      vsync          => vblank_trigger,
+                     
+      bus_ena_in     => mem_bus_ena,
+      sleep_cheats   => sleep_cheats,
+                    
+      BusAddr        => Cheats_BusAddr,     
+      BusRnW         => Cheats_BusRnW,      
+      BusACC         => Cheats_BusACC,      
+      BusWriteData   => Cheats_BusWriteData,
+      Bus_ena        => Cheats_Bus_ena,     
+      BusReadData    => mem_bus_din, 
+      BusDone        => mem_bus_done
+   );
+   
+   igba_gpiodummy : entity work.gba_gpiodummy
+   port map
+   (
+      clk100               => clk100,       
+                                           
+      GPIO_readEna         => GPIO_readEna, 
+      GPIO_done            => GPIO_done,   
+      GPIO_Din             => GPIO_Din,     
+      GPIO_Dout            => GPIO_Dout,    
+      GPIO_writeEna        => GPIO_writeEna,
+      GPIO_addr            => GPIO_addr    
    );
    
    process (clk100)
@@ -432,8 +525,12 @@ begin
       mem_bus_dout         => mem_bus_dout,
       mem_bus_din          => mem_bus_din, 
       mem_bus_done         => mem_bus_done,
+      mem_bus_unread       => mem_bus_unread,
       
       bus_lowbits          => bus_lowbits,
+      
+      dma_soon             => dma_soon,
+      settle               => settle,
       
       save_eeprom          => save_eeprom,
       save_sram            => save_sram,  
@@ -450,6 +547,8 @@ begin
       MaxPakAddr           => MaxPakAddr_modified,
       SramFlashEnable      => SramFlashEnable,
       memory_remap         => memory_remap,
+      
+      bitmapdrawmode       => bitmapdrawmode,
       
       VRAM_Lo_addr         => VRAM_Lo_addr,   
       VRAM_Lo_datain       => VRAM_Lo_datain, 
@@ -476,6 +575,14 @@ begin
       PALETTE_OAM_dataout  => PALETTE_OAM_dataout,
       PALETTE_OAM_we       => PALETTE_OAM_we,
 
+      specialmodule        => specialmodule,
+      GPIO_readEna         => GPIO_readEna,
+      GPIO_done            => GPIO_done,    
+      GPIO_Din             => GPIO_Din,     
+      GPIO_Dout            => GPIO_Dout,    
+      GPIO_writeEna        => GPIO_writeEna,
+      GPIO_addr            => GPIO_addr,    
+
       debug_mem            => debug_mem      
    );
    
@@ -490,11 +597,15 @@ begin
       
       gb_bus              => gb_bus,
       
+      new_cycles          => new_cycles,      
+      new_cycles_valid    => new_cycles_valid,
+      
       IRP_DMA             => IRP_DMA,
       
       dma_on              => dma_on,
       CPU_bus_idle        => CPU_bus_idle,
       do_step             => gba_step,
+      dma_soon            => dma_soon,
       
       sound_dma_req       => sound_dma_req,
       hblank_trigger      => hblank_trigger,
@@ -514,6 +625,7 @@ begin
       dma_bus_dout        => dma_bus_dout,
       dma_bus_din         => dma_bus_din, 
       dma_bus_done        => dma_bus_done,
+      dma_bus_unread      => dma_bus_unread,
       
       debug_dma           => debug_dma
    );
@@ -558,7 +670,12 @@ begin
 
       gb_bus               => gb_bus,
 
+      lockspeed            => GBA_lockspeed,
       interframe_blend     => interframe_blend,
+      maxpixels            => maxpixels,
+      shade_mode           => shade_mode,
+      
+      bitmapdrawmode       => bitmapdrawmode,
 
       pixel_out_x          => pixel_out_x,
       pixel_out_y          => pixel_out_y,
@@ -658,6 +775,7 @@ begin
       wait_cnt_value   => unsigned(REG_WAITCNT),
       wait_cnt_update  => WAITCNT_written,
       
+      settle           => settle,
       dma_on           => dma_on,
       do_step          => gba_step,
       done             => cpu_done,
@@ -788,7 +906,7 @@ begin
          end if;
          
          gba_step <= '0';
-         if (DEBUG_NOCPU = '0' and sleep_savestate = '0' and (GBA_lockspeed = '0' or GBA_cputurbo = '1' or cycles_ahead < unsigned(CyclePrecalc))) then
+         if (DEBUG_NOCPU = '0' and sleep_savestate = '0' and sleep_cheats = '0' and (GBA_lockspeed = '0' or GBA_cputurbo = '1' or cycles_ahead < unsigned(CyclePrecalc))) then
             gba_step <= '1';
          end if;
       

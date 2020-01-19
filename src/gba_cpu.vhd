@@ -32,6 +32,7 @@ entity gba_cpu is
         
       bus_lowbits      : out   std_logic_vector(1 downto 0) := "00";
         
+      settle           : in    std_logic;
       dma_on           : in    std_logic;
       do_step          : in    std_logic;
       done             : buffer std_logic := '0';
@@ -341,6 +342,7 @@ architecture arch of gba_cpu is
    signal decode_block_reglist            : std_logic_vector(15 downto 0) := (others => '0');
    signal decode_psr_with_spsr            : std_logic := '0';
    signal decode_leaveirp                 : std_logic := '0';
+   signal decode_leaveirp_user            : std_logic := '0';
    
    signal execute_functions_detail : tFunctions_detail;
    signal execute_datareceivetype  : tdatareceivetype;
@@ -380,6 +382,7 @@ architecture arch of gba_cpu is
    signal execute_block_reglist           : std_logic_vector(15 downto 0) := (others => '0');
    signal execute_psr_with_spsr           : std_logic := '0';
    signal execute_leaveirp                : std_logic := '0';
+   signal execute_leaveirp_user           : std_logic := '0';
    
    -- ############# ALU ##############
    type talu_stage is
@@ -758,7 +761,15 @@ begin
                      fetch_available <= '1';
                      fetch_data      <= gb_bus_din;
                      if (thumbmode = '1') then
-                        lastread <= gb_bus_din(15 downto 0) & gb_bus_din(15 downto 0);
+                        if (PC(27 downto 24) = x"3") then
+                           if (PC(1) = '0') then
+                              lastread(31 downto 16) <= gb_bus_din(15 downto 0);
+                           else
+                              lastread(15 downto 0) <= gb_bus_din(15 downto 0);
+                           end if;
+                        else
+                           lastread <= gb_bus_din(15 downto 0) & gb_bus_din(15 downto 0);
+                        end if;
                      else
                         lastread <= gb_bus_din;
                      end if;
@@ -838,7 +849,7 @@ begin
                      state_decode   <= DECODE_DONE;
                      
                   when DECODE_DONE =>
-                     if (state_execute = FETCH_OP and do_step = '1' and dma_on = '0' and halt = '0') then
+                     if (state_execute = FETCH_OP and do_step = '1' and dma_on = '0' and settle = '0' and halt = '0') then
                         decode_request <= '1';
                         decode_ack     <= '1';
                         state_decode   <= WAITFETCH;
@@ -1017,7 +1028,7 @@ begin
             case state_execute is
                
                when FETCH_OP =>
-                  if (irq_triggerhold = '1' and IRQ_disable = '0' and dma_on = '0') then
+                  if (irq_triggerhold = '1' and IRQ_disable = '0' and dma_on = '0' and settle = '0') then
 
                      if (state_decode /= WAITFETCH) then -- dont do irp when decode_PC has not been updated
                         halt            <= '0';
@@ -1034,7 +1045,7 @@ begin
                         
                      end if;
                      
-                  elsif (halt = '1' and dma_on = '0') then
+                  elsif (halt = '1' and dma_on = '0' and settle = '0') then
                      
                      if (do_step = '1') then 
                         if (halt_cnt < 5) then
@@ -1046,7 +1057,7 @@ begin
                         end if;
                      end if;
 
-                  elsif (state_decode = DECODE_DONE and do_step = '1' and dma_on = '0' and jump = '0') then
+                  elsif (state_decode = DECODE_DONE and do_step = '1' and dma_on = '0' and settle = '0' and jump = '0') then
                   
                      execute_cycles <= 0;
                   
@@ -1132,6 +1143,7 @@ begin
                      execute_block_reglist            <= decode_block_reglist; 
                      execute_psr_with_spsr            <= decode_psr_with_spsr; 
                      execute_leaveirp                 <= decode_leaveirp; 
+                     execute_leaveirp_user            <= decode_leaveirp_user; 
                      
                   end if;
                
@@ -1642,6 +1654,7 @@ begin
          decode_datatransfer_swap      <= '0';
          decode_datatransfer_writeback <= '0';
          decode_leaveirp               <= '0';
+         decode_leaveirp_user          <= '0';
          
          decode_shiftsettings    <= decode_datacomb(11 downto 4);
    
@@ -1708,6 +1721,10 @@ begin
                   
                   if ((unsigned(opcode) < 8 or unsigned(opcode) >= 12) and Rdest = x"F" and updateflags = '1') then
                      decode_leaveirp <= '1';
+                     if (cpu_mode = CPUMODE_SYSTEM or cpu_mode = CPUMODE_USER) then
+                        decode_leaveirp_user <= '1';
+                        decode_updateflags   <= '0';
+                     end if;
                   end if;
                
                end if;
@@ -2276,15 +2293,23 @@ begin
                         execute_saveregs       <= '1';
                         execute_saveState      <= '0';
                         execute_switchregs     <= '1';
+                        if (
+                              (cpu_mode = CPUMODE_USER   and (std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_USER or std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_SYSTEM)) or
+                              (cpu_mode = CPUMODE_SYSTEM and (std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_USER or std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_SYSTEM))
+                          ) then
+                           execute_switchregs  <= '0';
+                        end if;
                         cpu_mode_old           <= cpu_mode;
-                        cpu_mode               <= std_logic_vector(regs(17)(3 downto 0));
-                        thumbmode              <= regs(17)(5);
-                        FIQ_disable            <= regs(17)(6);
-                        IRQ_disable            <= regs(17)(7);
-                        Flag_Negative          <= regs(17)(31);
-                        Flag_Zero              <= regs(17)(30);
-                        Flag_Carry             <= regs(17)(29);
-                        Flag_V_Overflow        <= regs(17)(28);
+                        if (execute_leaveirp_user = '0') then
+                           cpu_mode               <= std_logic_vector(regs(17)(3 downto 0));
+                           thumbmode              <= regs(17)(5);
+                           FIQ_disable            <= regs(17)(6);
+                           IRQ_disable            <= regs(17)(7);
+                           Flag_Negative          <= regs(17)(31);
+                           Flag_Zero              <= regs(17)(30);
+                           Flag_Carry             <= regs(17)(29);
+                           Flag_V_Overflow        <= regs(17)(28);
+                        end if;
                
                   end case;
                   
@@ -2469,6 +2494,12 @@ begin
                         if (cpu_mode /= std_logic_vector(new_value(3 downto 0))) then
                            execute_switchregs <= '1';
                         end if;
+                        if (
+                              (cpu_mode = CPUMODE_USER   and (std_logic_vector(new_value(3 downto 0)) = CPUMODE_USER or std_logic_vector(new_value(3 downto 0)) = CPUMODE_SYSTEM)) or
+                              (cpu_mode = CPUMODE_SYSTEM and (std_logic_vector(new_value(3 downto 0)) = CPUMODE_USER or std_logic_vector(new_value(3 downto 0)) = CPUMODE_SYSTEM))
+                          ) then
+                           execute_switchregs  <= '0';
+                        end if;
                         execute_saveregs   <= '1';
                         cpu_mode_old       <= cpu_mode;
                         cpu_mode           <= std_logic_vector(new_value(3 downto 0));
@@ -2603,7 +2634,7 @@ begin
                               busPrefetchAdd     <= '1';
                               busPrefetchClear   <= busaddress(27);
                               execute_addcycles  <= 3 + dataTicksAccess32 + dataTicksAccess32;
-                              prefetch_addcycles <= 4 + dataTicksAccess32 + dataTicksAccess32;
+                              prefetch_addcycles <= 3 + dataTicksAccess32 + dataTicksAccess32 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                            elsif (execute_datatransfer_swap = '0') then
                               busPrefetchAdd    <= '1';
                               busPrefetchClear  <= busaddress(27);
@@ -2611,20 +2642,20 @@ begin
                                  case (execute_datatransfer_type) is
                                     when ACCESS_8BIT | ACCESS_16BIT => 
                                        execute_addcycles  <= 3 + dataTicksAccess16;
-                                       prefetch_addcycles <= 4 + dataTicksAccess16;
+                                       prefetch_addcycles <= 3 + dataTicksAccess16 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                                     when ACCESS_32BIT               => 
                                        execute_addcycles  <= 3 + dataTicksAccess32;
-                                       prefetch_addcycles <= 4 + dataTicksAccess32;
+                                       prefetch_addcycles <= 3 + dataTicksAccess32 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                                     when others => null;
                                  end case;
                               else
                                  case (execute_datatransfer_type) is
                                     when ACCESS_8BIT | ACCESS_16BIT => 
                                        execute_addcycles  <= 2 + dataTicksAccess16;
-                                       prefetch_addcycles <= 3 + dataTicksAccess16;
+                                       prefetch_addcycles <= 2 + dataTicksAccess16 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                                     when ACCESS_32BIT => 
                                        execute_addcycles  <= 2 + dataTicksAccess32;
-                                       prefetch_addcycles <= 3 + dataTicksAccess32;
+                                       prefetch_addcycles <= 2 + dataTicksAccess32 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                                     when others => null;
                                  end case;
                               end if;
@@ -2783,10 +2814,10 @@ begin
                            busPrefetchClear <= busaddress(27);
                            if (first_mem_access = '1') then
                               execute_addcycles  <= 1 + dataTicksAccess32;
-                              prefetch_addcycles <= 2 + dataTicksAccess32;
+                              prefetch_addcycles <= 2 + dataTicksAccess32 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                            else
                               execute_addcycles  <= 1 + dataTicksAccessSeq32;
-                              prefetch_addcycles <= 2 + dataTicksAccessSeq32;
+                              prefetch_addcycles <= 1 + dataTicksAccessSeq32 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                            end if;
                         end if;
                         
@@ -2815,10 +2846,10 @@ begin
                            busPrefetchClear <= busaddress(27);
                            if (first_mem_access = '1') then
                               execute_addcycles  <= 2 + dataTicksAccess32;
-                              prefetch_addcycles <= 3 + dataTicksAccess32;
+                              prefetch_addcycles <= 3 + dataTicksAccess32 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                            else
                               execute_addcycles  <= 1 + dataTicksAccessSeq32;
-                              prefetch_addcycles <= 2 + dataTicksAccessSeq32;
+                              prefetch_addcycles <= 1 + dataTicksAccessSeq32 + (codeticksAccess16 - codeticksAccessSeq16 - 1);
                            end if;
                         end if;
                       
@@ -2864,6 +2895,12 @@ begin
                         calc_done          <= '1';
                         execute_saveState  <= '1';
                         execute_switchregs <= '1';
+                        if (
+                              (cpu_mode = CPUMODE_USER   and (std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_USER or std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_SYSTEM)) or
+                              (cpu_mode = CPUMODE_SYSTEM and (std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_USER or std_logic_vector(regs(17)(3 downto 0)) = CPUMODE_SYSTEM))
+                          ) then
+                           execute_switchregs  <= '0';
+                        end if;
                         execute_saveregs   <= '1';
                         cpu_mode_old       <= cpu_mode;
                         cpu_mode           <= std_logic_vector(regs(17)(3 downto 0));
@@ -2915,6 +2952,12 @@ begin
                      cpu_mode           <= CPUMODE_SUPERVISOR;
                      thumbmode          <= '0';
                      IRQ_disable        <= '1';
+                     -- only switch for when not in system/usermode?
+                     --FIQ_disable        <= regs(17)(6);
+                     --Flag_Negative      <= regs(17)(31);
+                     --Flag_Zero          <= regs(17)(30);
+                     --Flag_Carry         <= regs(17)(29);
+                     --Flag_V_Overflow    <= regs(17)(28);
                      new_pc             <= to_unsigned(8, new_pc'length);
                      branchnext         <= '1';
                   end if;
@@ -3238,7 +3281,7 @@ begin
                
             end if;
                
-            if (state_decode = DECODE_DONE and state_execute = FETCH_OP and do_step = '1' and dma_on = '0' and halt = '0' and (irq_triggerhold = '0' or IRQ_disable = '1')) then
+            if (state_decode = DECODE_DONE and state_execute = FETCH_OP and do_step = '1' and dma_on = '0' and settle = '0' and halt = '0' and (irq_triggerhold = '0' or IRQ_disable = '1')) then
                for i in 0 to 17 loop
                   outsave_regs(i) := regs(i);
                end loop;

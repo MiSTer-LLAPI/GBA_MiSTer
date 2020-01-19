@@ -162,12 +162,15 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 // 0         1         2         3
 // 01234567890123456789012345678901
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXX XXXXXXXXXXXX    X
+// XXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
 	"GBA;;",
 	"FS,GBA;",
+   "-;",
+   "C,Cheats;",
+	"H1O6,Cheats Enabled,Yes,No;",
 	"-;",
 	"D0RC,Reload Backup RAM;",
 	"D0RD,Save Backup RAM;",
@@ -177,16 +180,18 @@ parameter CONF_STR = {
 	"h4H3RI,Restore state (F1);",
 	"h4H3-;",
 	"O1,Aspect Ratio,3:2,16:9;",
-	"O9A,Desaturate,Off,Level 1,Level 2,Level 3;",
-	"OB,Sync core to video,Off,On;",
 	"O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"O9A,Desaturate,Off,Level 1,Level 2,Level 3;",
+   "OOQ,Shader Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4;",
+   "OJ,Flickerblend,Off,On;",
+   "OK,Spritelimit,Off,On;",
 	"O78,Stereo Mix,None,25%,50%,100%;", 
 	"-;",
 	"OM,Serial Mode,Off,LLAPI;",
 	"OEF,Storage,Auto,SDRAM,DDR3;",
 	"O5,Pause,Off,On;",
-   "OJ,Flickerblend,Off,On;",
 	"H2OG,Turbo,Off,On;",
+	"OB,Sync core to video,Off,On;",
 	"R0,Reset;",
 	"J1,A,B,L,R,Select,Start,FastForward;",
 	"jn,A,B,L,R,Select,Start,X;",
@@ -204,7 +209,7 @@ parameter CONF_STR = {
 
 wire  [1:0] buttons;
 wire [31:0] status;
-wire [15:0] status_menumask = {cart_loaded, |cart_type, force_turbo, 1'b0, ~bk_ena};
+wire [15:0] status_menumask = {cart_loaded, |cart_type, force_turbo, ~gg_active, ~bk_ena};
 wire        forced_scandoubler;
 reg  [31:0] sd_lba;
 reg         sd_rd = 0;
@@ -243,6 +248,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.ps2_key(ps2_key),
 
 	.status(status),
+	.status_in({status[31:17],1'b0,status[15:0]}),
+	.status_set(cart_download),	
 	.status_menumask(status_menumask),
 	.info_req(ss_info_req),
 	.info(ss_info),
@@ -354,14 +361,14 @@ always @(posedge clk_sys) begin
 
 		if(status[18:17]) ss_base <= 0;
 
-		ss_info <= 7'd1 + {ss_base, ss_load};
-		ss_info_req <= (ss_load | ss_save);
+		if(ss_load | ss_save) ss_info <= 7'd1 + {ss_base, ss_load};
+		ss_info_req <= (ss_loaded | ss_save);
 	end
 end
 
 ////////////////////////////  SYSTEM  ///////////////////////////////////
 
-wire        save_eeprom, save_sram, save_flash;
+wire save_eeprom, save_sram, save_flash, ss_loaded;
 
 reg fast_forward, pause, cpu_turbo;
 reg ff_latch;
@@ -421,7 +428,16 @@ gba
    .save_state(ss_save),
    .load_state(ss_load),
    .interframe_blend(status[19]),
+   .maxpixels(status[20]),
+   .shade_mode(status[26:24]),
+	.specialmodule('0),
 
+   .cheat_clear(gg_reset),
+   .cheats_enabled(~status[6]),
+   .cheat_on(gg_valid),   
+   .cheat_in(gg_code), 
+   .cheats_active(gg_active), 
+   
 	.sdram_read_ena(sdram_req),       // triggered once for read request 
 	.sdram_read_done(sdram_ack),      // must be triggered once when sdram_read_data is valid after last read
 	.sdram_read_addr(sdram_addr),     // all addresses are DWORD addresses!
@@ -445,6 +461,7 @@ gba
 	.save_eeprom(save_eeprom),
 	.save_sram(save_sram),
 	.save_flash(save_flash),
+	.load_done(ss_loaded),
 
 	.bios_wraddr(bios_wraddr),
 	.bios_wrdata(bios_wrdata),
@@ -488,26 +505,49 @@ always @(posedge clk_sys) begin
 		if(ioctl_addr[26:4] == 'hA) begin
 			if(ioctl_addr[3:0] <  12) cart_id[{4'd10 - ioctl_addr[3:0], 3'd0} +:16] <= {ioctl_dout[7:0],ioctl_dout[15:8]};
 			if(ioctl_addr[3:0] == 12) begin
-				if(cart_id == {"ROCKY BOXING"} )              begin sram_quirk <= 1;                          end // Rocky US
-				if(cart_id == {"ROCKY", 56'h00000000000000} ) begin sram_quirk <= 1;                          end // Rocky EU
-				if(cart_id == {"DBZ LGCYGOKU"} )              begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku US
-				if(cart_id == {"DRAGONBALL Z"} )              begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku EU
-				if(cart_id == {"DBZ TAIKETSU"} )              begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu US
-				if(cart_id == {"DRAGON BALLZ"} )              begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu EU
-				if(cart_id == {"TOPGUN CZ", 24'h000000} )     begin sram_quirk <= 1;                          end // Top Gun - Combat Zones
-				if(cart_id == {"IRIDIONII", 24'h000000} )     begin sram_quirk <= 1;                          end // Iridion II EU and US
-				if(cart_id == {"BOMBER MAN", 16'h0000} )      begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Bomberman
-				if(cart_id == {"CASTLEVANIA", 8'h00} )        begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Castlevania
-				if(cart_id == {"DONKEY KONG", 8'h00} )        begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Donkey Kong
-				if(cart_id == {"DR. MARIO", 24'h000000} )     begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series DR. MARIO
-				if(cart_id == {"EXCITEBIKE", 16'h0000} )      begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series EXCITEBIKE
-				if(cart_id == {"ICE CLIMBER", 8'h00} )        begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series ICE CLIMBER
-				if(cart_id == {"NES METROID", 8'h00} )        begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series NES METROID
-				if(cart_id == {"PAC-MAN", 40'h0000000000} )   begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series PAC-MAN
-				if(cart_id == {"SUPER MARIO", 8'h00} )        begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series SUPER MARIO Bros
-				if(cart_id == {"ZELDA 1", 40'h0000000000} )   begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series The Legend of Zelda
-				if(cart_id == {"XEVIOUS", 40'h0000000000} )   begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series XEVIOUS
-				if(cart_id == {"NES ZELDA 2", 8'h00} )        begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Zelda II - The Adventure of Link
+				if(cart_id == {"ROCKY BOXING"} )              	begin sram_quirk <= 1;                          end // Rocky US
+				if(cart_id == {"ROCKY", 56'h00000000000000} ) 	begin sram_quirk <= 1;                          end // Rocky EU
+				if(cart_id == {"DBZ LGCYGOKU"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku US
+				if(cart_id == {"DRAGONBALL Z"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku EU
+				if(cart_id == {"DBZ TAIKETSU"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu US
+				if(cart_id == {"DRAGON BALLZ"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu EU
+				if(cart_id == {"TOPGUN CZ", 24'h000000} )     	begin sram_quirk <= 1;                          end // Top Gun - Combat Zones
+				if(cart_id == {"IRIDIONII", 24'h000000} )     	begin sram_quirk <= 1;                          end // Iridion II EU and US
+				if(cart_id == {"BOMBER MAN", 16'h0000} )      	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Bomberman / Famicom Mini 09 - Bomber Man
+				if(cart_id == {"CASTLEVANIA", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Castlevania
+				if(cart_id == {"DONKEY KONG", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Donkey Kong / Famicom Mini 02 - Donkey Kong
+				if(cart_id == {"DR. MARIO", 24'h000000} )     	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series DR. MARIO / Famicom Mini 15 - Dr. Mario
+				if(cart_id == {"EXCITEBIKE", 16'h0000} )      	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series EXCITEBIKE / Famicom Mini 04 - Excitebike
+				if(cart_id == {"ICE CLIMBER", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series ICE CLIMBER / Famicom Mini 03 - Ice Climber
+				if(cart_id == {"NES METROID", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series NES METROID
+				if(cart_id == {"PAC-MAN", 40'h0000000000} )   	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series PAC-MAN / Famicom Mini 06 - Pac-Man
+				if(cart_id == {"SUPER MARIO", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series SUPER MARIO Bros / Famicom Mini 01 - Super Mario Bros.
+				if(cart_id == {"ZELDA 1", 40'h0000000000} )   	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series The Legend of Zelda / Famicom Mini 05 - Zelda no Densetsu 1 - The Hyrule Fantasy
+				if(cart_id == {"XEVIOUS", 40'h0000000000} )   	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series XEVIOUS / Famicom Mini 07 - Xevious
+				if(cart_id == {"NES ZELDA 2", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Classic NES Series Zelda II - The Adventure of Link
+				if(cart_id == {"SUPER ROBOT2"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini - Dai-2-ji Super Robot Taisen (Japan) (Promo)
+				if(cart_id == {"Z-GUNDAM", 32'h00000000} )    	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini - Kidou Senshi Z Gundam - Hot Scramble (Japan) (Promo)
+				if(cart_id == {"SD GACHAPON1"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 30 - SD Gundam World - Gachapon Senshi Scramble Wars
+				if(cart_id == {"DRACULA 1", 24'h000000} )     	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 29 - Akumajou Dracula
+				if(cart_id == {"TANTEI CLUB2"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 28 - Famicom Tantei Club Part II - Ushiro ni Tatsu Shoujo - Zen, Kouhen
+				if(cart_id == {"TANTEI CLUB1"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 27 - Famicom Tantei Club - Kieta Koukeisha - Zen, Kouhen
+				if(cart_id == {"ONIGASHIMA", 16'h0000} )      	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 26 - Famicom Mukashibanashi - Shin Onigashima - Zen, Kouhen
+				if(cart_id == {"LINK", 64'h0000000000000000} )	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 25 - The Legend of Zelda 2 - Link no Bouken
+				if(cart_id == {"PARTHENA", 32'h00000000} )    	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 24 - Hikari Shinwa - Palthena no Kagami
+				if(cart_id == {"FMS METROID", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 23 - Metroid
+				if(cart_id == {"MURASAME", 32'h00000000} )    	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 22 - Nazo no Murasame Jou
+				if(cart_id == {"SUPER MARIO2"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 21 - Super Mario Bros. 2
+				if(cart_id == {"GOEMON 1", 32'h00000000} )    	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 20 - Ganbare Goemon! - Karakuri Douchuu
+				if(cart_id == {"TWINBEE", 40'h0000000000} )   	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 19 - Twin Bee
+				if(cart_id == {"MAKAIMURA", 24'h000000} )     	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 18 - Makaimura
+				if(cart_id == {"BOKENJIMA 1", 8'h00} )        	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 17 - Takahashi Meijin no Bouken-jima
+				if(cart_id == {"DIG DUG", 40'h0000000000} )   	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 16 - Dig Dug
+				if(cart_id == {"WRECKINGCREW"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 14 - Wrecking Crew
+				if(cart_id == {"BALLOONFIGHT"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 13 - Balloon Fight
+				if(cart_id == {"CLU CLU LAND"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 12 - Clu Clu Land
+				if(cart_id == {"MARIO BROS.", 8'h00} )      	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 11 - Mario Bros.
+				if(cart_id == {"STAR SOLDIER"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 10 - Star Soldier
+				if(cart_id == {"MAPPY", 56'h00000000000000} ) 	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 08 - Mappy
 			end
 		end
 	end
@@ -774,7 +814,7 @@ end
 ////////////////////////////  VIDEO  ////////////////////////////////////
 
 wire [15:0] pixel_addr;
-wire [14:0] pixel_data;
+wire [17:0] pixel_data;
 wire        pixel_we;
 
 reg vsync;
@@ -787,7 +827,7 @@ always @(posedge clk_sys) begin
 	vsync <= |sync;
 end
 
-dpram_n #(16,15,38400) vram
+dpram_n #(16,18,38400) vram
 (
 	.clock_a(clk_sys),
 	.address_a(pixel_addr),
@@ -800,11 +840,11 @@ dpram_n #(16,15,38400) vram
 );
 
 wire [15:0] px_addr;
-wire [14:0] rgb;
+wire [17:0] rgb;
 wire sync_core = status[11];
 
 reg hs, vs, hbl, vbl, ce_pix;
-reg [4:0] r,g,b;
+reg [5:0] r,g,b;
 reg hold_reset, force_pause;
 reg [13:0] force_pause_cnt;
 
@@ -890,9 +930,9 @@ wire [2:0] scale = status[4:2];
 wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
 wire       scandoubler = (scale || forced_scandoubler);
 
-wire [7:0] r_in = {r,r[4:2]};
-wire [7:0] g_in = {g,g[4:2]};
-wire [7:0] b_in = {b,b[4:2]};
+wire [7:0] r_in = {r,r[5:4]};
+wire [7:0] g_in = {g,g[5:4]};
+wire [7:0] b_in = {b,b[5:4]};
 
 //wire [7:0] luma = r_in[7:3] + g_in[7:1] + g_in[7:2] + b_in[7:3];
 wire [7:0] luma = r_in[7:2] + g_in[7:1] + g_in[7:3] + b_in[7:3];
@@ -1041,6 +1081,44 @@ always @(posedge clk_sys) begin
 					sd_lba <= sd_lba + 1'd1;
 					if(sd_lba[7:0] == save_sz) bk_state <= 0;
 				end
+		endcase
+	end
+end
+
+////////////////////////////  CODES  ///////////////////////////////////
+
+// Code layout:
+// {code flags,     32'b address, 32'b compare, 32'b replace}
+//  127:96          95:64         63:32         31:0
+// Integer values are in BIG endian byte order, so it up to the loader
+// or generator of the code to re-arrange them correctly.
+reg [127:0] gg_code;
+reg gg_valid;
+reg gg_reset;
+reg ioctl_download_1;
+wire gg_active;
+always_ff @(posedge clk_sys) begin
+	
+   gg_reset <= 0;
+   ioctl_download_1 <= ioctl_download;
+	if (ioctl_download && ~ioctl_download_1 && ioctl_index == 255) begin
+      gg_reset <= 1;
+   end
+   
+   gg_valid <= 0;
+	if (code_download & ioctl_wr) begin
+		case (ioctl_addr[3:0])
+			0:  gg_code[111:96]  <= ioctl_dout; // Flags Bottom Word
+			2:  gg_code[127:112] <= ioctl_dout; // Flags Top Word
+			4:  gg_code[79:64]   <= ioctl_dout; // Address Bottom Word
+			6:  gg_code[95:80]   <= ioctl_dout; // Address Top Word
+			8:  gg_code[47:32]   <= ioctl_dout; // Compare Bottom Word
+			10: gg_code[63:48]   <= ioctl_dout; // Compare top Word
+			12: gg_code[15:0]    <= ioctl_dout; // Replace Bottom Word
+			14: begin
+				gg_code[31:16]    <= ioctl_dout; // Replace Top Word
+				gg_valid          <= 1;          // Clock it in
+			end
 		endcase
 	end
 end

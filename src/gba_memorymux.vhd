@@ -46,13 +46,17 @@ entity gba_memorymux is
       mem_bus_dout         : in     std_logic_vector(31 downto 0);
       mem_bus_din          : out    std_logic_vector(31 downto 0) := (others => '0');
       mem_bus_done         : out    std_logic;
+      mem_bus_unread       : out    std_logic;
       
       bios_wraddr          : in     std_logic_vector(11 downto 0) := (others => '0');
       bios_wrdata          : in     std_logic_vector(31 downto 0) := (others => '0');
       bios_wr              : in     std_logic := '0';
       
       bus_lowbits          : in     std_logic_vector(1 downto 0);
-                                    
+      
+      dma_soon             : in     std_logic;
+      settle               : out    std_logic;
+      
       save_eeprom          : out    std_logic := '0';
       save_sram            : out    std_logic := '0';
       save_flash           : out    std_logic := '0';
@@ -68,6 +72,8 @@ entity gba_memorymux is
       MaxPakAddr           : in     std_logic_vector(24 downto 0);
       SramFlashEnable      : in     std_logic;
       memory_remap         : in     std_logic;
+      
+      bitmapdrawmode       : in     std_logic;
                                     
       VRAM_Lo_addr         : out    integer range 0 to 16383;
       VRAM_Lo_datain       : out    std_logic_vector(31 downto 0);
@@ -94,7 +100,15 @@ entity gba_memorymux is
       PALETTE_OAM_dataout  : in     std_logic_vector(31 downto 0);
       PALETTE_OAM_we       : out    std_logic_vector(3 downto 0);
       
-      debug_mem            : out   std_logic_vector(31 downto 0)  
+      specialmodule        : in     std_logic;
+      GPIO_readEna         : out    std_logic;
+      GPIO_done            : in     std_logic;
+      GPIO_Din             : in     std_logic_vector(3 downto 0);
+      GPIO_Dout            : out    std_logic_vector(3 downto 0);
+      GPIO_writeEna        : out    std_logic := '0';
+      GPIO_addr            : out    std_logic_vector(1 downto 0);
+      
+      debug_mem            : out    std_logic_vector(31 downto 0)  
    );
 end entity;
 
@@ -120,6 +134,7 @@ architecture arch of gba_memorymux is
       READAFTERPAK,
       READ_UNREADABLE,
       ROTATE,
+      READ_GPIO,
       WAIT_WRAMREADMODIFYWRITE,
       WRITE_WRAMLARGE,
       WRITE_WRAMSMALL,
@@ -149,6 +164,7 @@ architecture arch of gba_memorymux is
                              
    signal return_rotate      : std_logic_vector(1 downto 0);
    signal rotate_data        : std_logic_vector(31 downto 0) := (others => '0');
+   signal unread_next        : std_logic := '0';
       
    signal bios_data          : std_logic_vector(31 downto 0);
    signal bios_data_last     : std_logic_vector(31 downto 0) := (others => '0');
@@ -161,6 +177,9 @@ architecture arch of gba_memorymux is
    signal read_operation     : std_logic := '0';
                              
    signal rotate_writedata   : std_logic_vector(31 downto 0) := (others => '0');
+   
+   signal registersettle     : std_logic := '0';
+   signal registersettle_cnt : integer range 0 to 7 := 0;
    
    -- minicache
    signal sdram_addr_buf     : std_logic_vector(21 downto 0) := (others => '1');
@@ -226,6 +245,8 @@ architecture arch of gba_memorymux is
    signal SAVESTATE_FLASH_BACK  : std_logic_vector(16 downto 0);
    
 begin 
+
+   settle <= '1' when registersettle = '1' or (new_cycles_valid = '1' and dma_soon = '1') else '0';
 
    igba_bios : entity work.gba_bios
    port map
@@ -346,6 +367,13 @@ begin
             sdram_addr_buf  <= (others => '1');
             state           <= IDLE;
          end if;
+         
+         -- register settle
+         registersettle <= '0';
+         if (registersettle_cnt > 0) then
+            registersettle     <= '1';
+            registersettle_cnt <= registersettle_cnt - 1;
+         end if;
       
          -- mini cache
          if (sdram_read_done = '1') then
@@ -382,8 +410,12 @@ begin
          OAMRAM_PROC_we  <= (others => '0');
          PALETTE_BG_we   <= (others => '0');
          PALETTE_OAM_we  <= (others => '0');
+         GPIO_readEna    <= '0';
+         GPIO_writeEna   <= '0';
          
          mem_bus_done    <= '0';
+         mem_bus_unread  <= '0';
+         unread_next     <= '0';
          
          cache_read_enable <= '0';
          
@@ -413,7 +445,7 @@ begin
                         
                            when x"0" => 
                               if (PC_in_BIOS = '0') then
-                                 if (unsigned(mem_bus_Adr) < 16#400#) then
+                                 if (unsigned(mem_bus_Adr) < 16#4000#) then
                                     --rotate_data <= x"E3A02004"; -- only applies for one situation!
                                     --rotate_data <= x"E55EC002"; -- only applies for one situation!
                                     rotate_data <= bios_data_last;
@@ -466,28 +498,27 @@ begin
                               --state             <= WAIT_PROCBUS;
                               if (unsigned(mem_bus_Adr(24 downto 2)) >= unsigned(MaxPakAddr)) then
                                  state       <= READAFTERPAK;
-                              elsif (sdram_addr_buf = mem_bus_Adr(24 downto 3) and mem_bus_Adr(0) = '0' and (mem_bus_acc = ACCESS_16BIT or mem_bus_acc = ACCESS_32BIT)) then
+                              elsif (sdram_addr_buf = mem_bus_Adr(24 downto 3) and mem_bus_Adr(0) = '0' and mem_bus_acc = ACCESS_16BIT) then
                                  mem_bus_done <= '1'; 
-                                 if (mem_bus_acc = ACCESS_16BIT) then
-                                    if (mem_bus_Adr(2) = '0') then
-                                       if (mem_bus_Adr(1) = '0') then
-                                          mem_bus_din <= x"0000" & sdram_data_buf(15 downto 0);
-                                       else
-                                          mem_bus_din <= x"0000" & sdram_data_buf(31 downto 16);
-                                       end if;
+                                 if (mem_bus_Adr(2) = '0') then
+                                    if (mem_bus_Adr(1) = '0') then
+                                       mem_bus_din <= x"0000" & sdram_data_buf(15 downto 0);
                                     else
-                                       if (mem_bus_Adr(1) = '0') then
-                                          mem_bus_din <= x"0000" & sdram_data_buf(47 downto 32);
-                                       else
-                                          mem_bus_din <= x"0000" & sdram_data_buf(63 downto 48);
-                                       end if;
+                                       mem_bus_din <= x"0000" & sdram_data_buf(31 downto 16);
                                     end if;
                                  else
-                                    if (mem_bus_Adr(2) = '0') then
-                                       mem_bus_din <= sdram_data_buf(31 downto 0);
+                                    if (mem_bus_Adr(1) = '0') then
+                                       mem_bus_din <= x"0000" & sdram_data_buf(47 downto 32);
                                     else
-                                       mem_bus_din <= sdram_data_buf(63 downto 32);
+                                       mem_bus_din <= x"0000" & sdram_data_buf(63 downto 48);
                                     end if;
+                                 end if;
+                              elsif (sdram_addr_buf = mem_bus_Adr(24 downto 3) and mem_bus_Adr(1 downto 0) = "00" and mem_bus_acc = ACCESS_32BIT) then
+                                 mem_bus_done <= '1';
+                                 if (mem_bus_Adr(2) = '0') then
+                                    mem_bus_din <= sdram_data_buf(31 downto 0);
+                                 else
+                                    mem_bus_din <= sdram_data_buf(63 downto 32);
                                  end if;
                               else
                                  cache_read_enable <= '1';
@@ -497,6 +528,14 @@ begin
                                     cache_read_addr   <= mem_bus_Adr(24 downto 2);
                                  end if;
                                  state             <= WAIT_SDRAM;
+                              end if;
+                              if (specialmodule = '1') then
+                                 if (unsigned(mem_bus_Adr(27 downto 0)) >= 16#80000C4# and unsigned(mem_bus_Adr(27 downto 0)) <= 16#80000C8#) then
+                                    state        <= READ_GPIO;
+                                    mem_bus_done <= '0';
+                                    GPIO_readEna <= '1';
+                                    GPIO_addr    <= std_logic_vector(to_unsigned(to_integer(unsigned(mem_bus_Adr(3 downto 1))) - 4 / 2, 2));
+                                 end if;
                               end if;
                            
                            when x"D" =>
@@ -544,10 +583,25 @@ begin
                                
                            -- done is ok, if the next state goes back to idle without conditions
                            when x"3" => state <= WRITE_WRAMSMALL; mem_bus_done <= '1'; 
-                           when x"4" => state <= WRITE_REG;
+                           
+                           when x"4" => 
+                              state <= WRITE_REG;
+                              registersettle_cnt <= 7;
+                              registersettle     <= '1';
+                           
                            when x"5" => state <= WRITE_PALETTE;   mem_bus_done <= '1';
                            when x"6" => state <= WRITE_VRAM;      mem_bus_done <= '1';
                            when x"7" => state <= WRITE_OAM;       mem_bus_done <= '1';
+                           when x"8" =>
+                              mem_bus_done <= '1';
+                              if (specialmodule = '1') then
+                                 if (unsigned(mem_bus_Adr(27 downto 0)) >= 16#80000C4# and unsigned(mem_bus_Adr(27 downto 0)) <= 16#80000C8#) then
+                                    GPIO_writeEna <= '1';
+                                    GPIO_addr     <= std_logic_vector(to_unsigned(to_integer(unsigned(mem_bus_Adr(3 downto 1))) - 4 / 2, 2));
+                                    GPIO_Dout     <= mem_bus_dout(3 downto 0);
+                                 end if;
+                              end if;
+                           
                            when x"D" => state <= EEPROMWRITE;  
                            when x"E" | x"F" => state <= FLASHSRAMWRITEDECIDE1; adr_save(1 downto 0) <= mem_bus_Adr(1 downto 0) or bus_lowbits;
                            when others => mem_bus_done <= '1'; --report "writing here not implemented!" severity failure;
@@ -774,11 +828,12 @@ begin
                
             when READAFTERPAK =>
                rotate_data <= adr_save(16 downto 2) & "1" & adr_save(16 downto 2) & "0";
-               state       <= rotate; 
+               state       <= ROTATE; 
                
             when READ_UNREADABLE =>
                rotate_data <= lastread;
-               state       <= rotate;   
+               state       <= ROTATE; 
+               unread_next <= '1';               
                
             when ROTATE =>
                if (acc_save = ACCESS_8BIT) then
@@ -806,8 +861,17 @@ begin
                      when others => null;
                   end case;
                end if;
-               mem_bus_done <= '1'; 
+               mem_bus_done   <= '1'; 
+               mem_bus_unread <= unread_next;
                state <= IDLE;
+               
+            when READ_GPIO =>
+               if (GPIO_done = '1') then
+                  mem_bus_done   <= '1'; 
+                  mem_bus_din    <= x"0000000" & GPIO_Din;
+                  state <= IDLE;
+               end if;
+               
             
             ----- writing
             
@@ -898,8 +962,6 @@ begin
             -- Writes to OBJ(6010000h - 6017FFFh)(or 6014000h - 6017FFFh in Bitmap mode) and to OAM(7000000h - 70003FFh) are ignored, the memory content remains unchanged.
             -- Writes to BG(6000000h - 600FFFFh)(or 6000000h - 6013FFFh in Bitmap mode) and to Palette(5000000h - 50003FFh) are writing the new 8bit value to BOTH upper and lower 8bits of the addressed halfword, ie. "[addr AND NOT 1]=data*101h".
             
-            -- not fully compliant implemented at differentiation between vram bg and vram obj, see comment
-            
             when WRITE_PALETTE =>
                PALETTE_BG_addr     <= to_integer(unsigned(adr_save(8 downto 2)));
                PALETTE_OAM_addr    <= to_integer(unsigned(adr_save(8 downto 2)));
@@ -954,25 +1016,30 @@ begin
                state <= IDLE;
                VRAM_be := (others => '0');
                if (acc_save = ACCESS_8BIT) then
-                  -- if ((GPU.videomode <= 2 && adr <= 0xFFFF) || GPU.videomode >= 3 && adr <= 0x013FFF)
-                  -- {
-                  case(adr_save(1 downto 0)) is
-                     when "00" => VRAM_be(0) := '1'; VRAM_be(1) := '1';
-                     when "01" => VRAM_be(1) := '1'; VRAM_be(0) := '1';
-                     when "10" => VRAM_be(2) := '1'; VRAM_be(3) := '1';
-                     when "11" => VRAM_be(3) := '1'; VRAM_be(2) := '1';
-                     when others => null;
-                  end case;
+                  -- maybe also just check like 16/32 bit?
+                  if ((bitmapdrawmode = '0' and unsigned(adr_save(16 downto 0)) <= 16#FFFF#) or (bitmapdrawmode = '1' and unsigned(adr_save(16 downto 0)) <= 16#13FFF#)) then
+                     case(adr_save(1 downto 0)) is
+                        when "00" => VRAM_be(0) := '1'; VRAM_be(1) := '1';
+                        when "01" => VRAM_be(1) := '1'; VRAM_be(0) := '1';
+                        when "10" => VRAM_be(2) := '1'; VRAM_be(3) := '1';
+                        when "11" => VRAM_be(3) := '1'; VRAM_be(2) := '1';
+                        when others => null;
+                     end case;
+                  end if;
                elsif (acc_save = ACCESS_16BIT) then
-                  if (adr_save(1) = '1') then
-                     VRAM_be(2) := '1';
-                     VRAM_be(3) := '1';
-                  else                                                               
-                     VRAM_be(0) := '1';
-                     VRAM_be(1) := '1';
+                  if ((bitmapdrawmode = '0' or unsigned(adr_save(16 downto 14)) /= "110")) then
+                     if (adr_save(1) = '1') then
+                        VRAM_be(2) := '1';
+                        VRAM_be(3) := '1';
+                     else                                                               
+                        VRAM_be(0) := '1';
+                        VRAM_be(1) := '1';
+                     end if;
                   end if;
                else
-                  VRAM_be := (others => '1');
+                  if ((bitmapdrawmode = '0' or unsigned(adr_save(16 downto 14)) /= "110")) then
+                     VRAM_be := (others => '1');
+                  end if;
                end if;
                VRAM_Hi_be <= VRAM_be;
                VRAM_Lo_be <= VRAM_be;

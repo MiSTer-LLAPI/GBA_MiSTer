@@ -15,26 +15,15 @@ Original GBA BIOS can be placed to GBA folder with name boot.rom
 PLEASE do not report errors without testing with the original BIOS
 
 # Games with crashes/hang
-- Banjo-Kazooie hangs after start. Workaround: instantly save ingame, reset the game and reload the save
-
-- Colin McRae Rally 2.0 hangs when going into race
-
-- Digimon Racing: hang on 3rd screen(Griptonite)
-
-- Fear Factor Unleashed: hang after ~4 seconds
-
-- Madden06/07: crash at coin toss
-
-- Sennen Kazoku: hang on first screen
-- Starsky & Hutch: crash going ingame
-- SuperMarioAdvance: MarioBros Minigame hangs. Same game is included  and working in Super Mario Advance 2
-
-- TOCA World Touring Cars: hangs going into race
+- Madden06/07: graphic messed up at coin toss
 
 # Games that are unplayable because of catridge hardware missing
 - Boktai 1/2/Shin Bokura no Taiyou(Japanese Boktai)
 - Warioware Twisted
 - Yoshi's Universal Gravitation
+- Bouken Yuuki Pluster World - Plust Gate/EX
+- Sennen Kazoku, Gachasute (RTC)
+- Koro Koro Puzzle
 
 # Status
 ~1600 games tested until ingame:
@@ -48,6 +37,9 @@ PLEASE do not report errors without testing with the original BIOS
 - FastForward - speed up game by factor 2-4
 - CPU Turbomode - give games additional CPU power
 - Flickerblend - turn on for games like F-Zero, Mario Kart or NES Classics to prevent flickering effects
+- Spritelimit - turn on to prevent wrong sprites for games that rely on the limit (opt-in as only 1 known game)
+- Cheats
+- Shadercolors
 
 # Savestates
 Core provides 4 slots to save the state. The first slot gets saved to disk and automatically loaded (but not applied)
@@ -62,8 +54,9 @@ Hot keys for save states:
 
 # Not included
 - Multiplayer features like Serial
-- Tilt/Gyro/Rumble/Sun sensor)
+- Tilt/Gyro/Rumble/Sun sensor
 - RTC
+- E-Reader support
 
 # Accuracy
 
@@ -73,10 +66,10 @@ The suite itself has several thousand single tests. Here is a comparison with mG
 
 Testname | TestCount | Mister GBA| mGBA | VBA-M | Higan
 ---------|-----------|-----------|------|-------|-------
-Memory   |      1552 |  1538     | 1552 |  1337 | 1552
+Memory   |      1552 |  1552     | 1552 |  1337 | 1552
 IOREAD   |       123 |   123     |  116 |   100 |  123
-Timing   |      1660 |  1408     | 1520 |   628 | 1424
+Timing   |      1660 |  1554     | 1520 |   628 | 1424
 Timer    |       936 |   445     |  511 |   440 |  464
 Carry    |        93 |    93     |   93 |    93 |   93
 BIOSMath |       625 |   625     |  625 |   425 |  625
-DMATests |      1256 |  1212     | 1232 |  1008 | 1064
+DMATests |      1256 |  1248     | 1232 |  1008 | 1064

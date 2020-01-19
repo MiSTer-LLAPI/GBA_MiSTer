@@ -34,10 +34,14 @@ entity gba_dma_module is
       
       gb_bus              : inout proc_bus_gb_type := ((others => 'Z'), (others => 'Z'), (others => 'Z'), 'Z', 'Z', 'Z', "ZZ", "ZZZZ", 'Z');
       
+      new_cycles          : in    unsigned(7 downto 0);
+      new_cycles_valid    : in    std_logic;
+      
       IRP_DMA             : out   std_logic := '0';
       
       dma_on              : out   std_logic := '0';
       allow_on            : in    std_logic;
+      dma_soon            : out   std_logic := '0';
       
       sound_dma_req       : in    std_logic;
       hblank_trigger      : in    std_logic;
@@ -61,6 +65,7 @@ entity gba_dma_module is
       dma_bus_dout        : out   std_logic_vector(31 downto 0) := (others => '0'); 
       dma_bus_din         : in    std_logic_vector(31 downto 0);
       dma_bus_done        : in    std_logic;
+      dma_bus_unread      : in    std_logic;
       
       is_idle             : out   std_logic
    );
@@ -82,11 +87,12 @@ architecture arch of gba_dma_module is
                                                                                                                                                    
    signal CNT_H_DMA_Enable_written           : std_logic;   
 
-   signal Enable  : std_logic_vector(0 downto 0) := "0";
-   signal running : std_logic := '0';
-   signal waiting : std_logic := '0';
-   signal first   : std_logic := '0';
-   signal dmaon   : std_logic := '0';
+   signal Enable    : std_logic_vector(0 downto 0) := "0";
+   signal running   : std_logic := '0';
+   signal waiting   : std_logic := '0';
+   signal first     : std_logic := '0';
+   signal dmaon     : std_logic := '0';
+   signal waitTicks : integer range 0 to 3 := 0;
    
    signal dest_Addr_Control  : integer range 0 to 3;
    signal source_Adr_Control : integer range 0 to 3;
@@ -142,7 +148,7 @@ begin
    
    SAVESTATE_DMAMIXED_BACK(16 downto 0)  <= std_logic_vector(count);
    SAVESTATE_DMAMIXED_BACK(17 downto 17) <= Enable;            
-   SAVESTATE_DMAMIXED_BACK(18)           <= running;           
+   SAVESTATE_DMAMIXED_BACK(18)           <= '1' when running = '1' or waitTicks > 0 else '0';           
    SAVESTATE_DMAMIXED_BACK(19)           <= waiting;           
    SAVESTATE_DMAMIXED_BACK(20)           <= first;             
    SAVESTATE_DMAMIXED_BACK(22 downto 21) <= std_logic_vector(to_unsigned(dest_Addr_Control, 2)); 
@@ -189,8 +195,8 @@ begin
             iRQ_on             <= SAVESTATE_DMAMIXED(29);
             dmaon              <= SAVESTATE_DMAMIXED(30);
          
+            waitTicks          <= 0;
             state              <= IDLE;
-         
          else
       
             -- dma init
@@ -257,8 +263,8 @@ begin
                   (Start_Timing = 1 and vblank_trigger = '1') or 
                   (Start_Timing = 2 and hblank_trigger = '1') or 
                   (Start_Timing = 3 and sound_dma_req = '1')) then
-                     dmaon      <= '1';
-                     running    <= '1';
+                     dma_soon   <= '1';
+                     waitTicks  <= 3;
                      waiting    <= '0';
                      first      <= '1';
                      fullcount  <= count;
@@ -266,6 +272,19 @@ begin
                end if;
                --if (DMAs[index].dMA_Start_Timing = 3 and index = 3) -- video dma not implemented"
       
+               if (waitTicks > 0) then
+                  if (new_cycles_valid = '1') then
+                     if (new_cycles >= waitTicks) then
+                        running   <= '1';
+                        dmaon     <= '1';
+                        waitTicks <= 0;
+                        dma_soon  <= '0';
+                     else
+                        waitTicks <= waitTicks - to_integer(new_cycles);
+                     end if;
+                  end if;
+               end if;
+                  
       
                -- dma work
                if (running = '1') then
@@ -298,9 +317,13 @@ begin
                            state <= WRITING;
                            dma_bus_rnw  <= '0';
                            dma_bus_ena  <= '1';
-                           dma_bus_Adr  <= std_logic_vector(addr_target);
+                           if (Transfer_Type_DW = '1') then
+                              dma_bus_Adr <= std_logic_vector(addr_target(27 downto 2)) & "00";
+                           else
+                              dma_bus_Adr <= std_logic_vector(addr_target(27 downto 1)) & "0";
+                           end if;
                            
-                           if (addr_source >= 16#2000000#) then
+                           if (addr_source >= 16#2000000# and dma_bus_unread = '0') then
                               dma_bus_dout   <= dma_bus_din;
                               last_dma_valid <= '1';
                               if (Transfer_Type_DW = '1') then                           
@@ -314,7 +337,7 @@ begin
                            
                            -- next settings
                            if (Transfer_Type_DW = '1') then
-                              if (source_Adr_Control = 0 or source_Adr_Control = 3) then 
+                              if (source_Adr_Control = 0 or source_Adr_Control = 3 or (addr_source >= 16#8000000# and addr_source < 16#E000000#)) then 
                                  addr_source <= addr_source + 4; 
                               elsif (source_Adr_Control = 1) then
                                  addr_source <= addr_source - 4;
@@ -326,7 +349,7 @@ begin
                                  addr_target <= addr_target - 4;
                               end if;
                            else
-                              if (source_Adr_Control = 0 or source_Adr_Control = 3) then 
+                              if (source_Adr_Control = 0 or source_Adr_Control = 3 or (addr_source >= 16#8000000# and addr_source < 16#E000000#)) then 
                                  addr_source <= addr_source + 2; 
                               elsif (source_Adr_Control = 1) then
                                  addr_source <= addr_source - 2;
