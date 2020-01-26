@@ -8,11 +8,12 @@ use work.pReg_savestates.all;
 entity gba_top is
    generic
    (
-      Softmap_GBA_Gamerom_ADDR : integer; -- count: 8388608  -- 32 Mbyte Data for GameRom
-      Softmap_GBA_WRam_ADDR    : integer; -- count:   65536  -- 256 Kbyte Data for GBA WRam Large
-      Softmap_GBA_FLASH_ADDR   : integer; -- count:  131072  -- 128/512 Kbyte Data for GBA Flash
-      Softmap_GBA_EEPROM_ADDR  : integer; -- count:    8192  -- 8/32 Kbyte Data for GBA EEProm
-      Softmap_SaveState_ADDR   : integer; -- count:  524288  -- 512 Kbyte Data for Savestate 
+      Softmap_GBA_Gamerom_ADDR : integer; -- count: 8388608    -- 32 Mbyte Data for GameRom
+      Softmap_GBA_WRam_ADDR    : integer; -- count:   65536    -- 256 Kbyte Data for GBA WRam Large
+      Softmap_GBA_FLASH_ADDR   : integer; -- count:  131072    -- 128/512 Kbyte Data for GBA Flash
+      Softmap_GBA_EEPROM_ADDR  : integer; -- count:    8192    -- 8/32 Kbyte Data for GBA EEProm
+      Softmap_SaveState_ADDR   : integer; -- count:  524288    -- 512 Kbyte Data for Savestate 
+      Softmap_Rewind_ADDR      : integer; -- count:  524288*64 -- 64*512 Kbyte Data for Savestates
       is_simu                  : std_logic := '0';
       turbosound               : std_logic  -- sound buffer to play sound in turbo mode without sound pitched up
    );
@@ -36,6 +37,9 @@ entity gba_top is
       maxpixels          : in     std_logic;                    -- limit pixels per line
       shade_mode         : in     std_logic_vector(2 downto 0); -- 0 = off, 1..4 modes
       specialmodule      : in     std_logic;                    -- 0 = off, 1 = use gamepak GPIO Port at address 0x080000C4..0x080000C8
+      rewind_on          : in     std_logic;
+      rewind_active      : in     std_logic;
+      savestate_number   : in     integer;
       -- cheats
       cheat_clear        : in     std_logic;
       cheats_enabled     : in     std_logic;
@@ -56,8 +60,8 @@ entity gba_top is
       bus_out_ena        : out    std_logic;                     -- one cycle high for each action
       bus_out_done       : in     std_logic;                     -- should be one cycle high when write is done or read value is valid
       -- savestate           
-      SAVE_out_Din       : out    std_logic_vector(31 downto 0); -- data read from savestate
-      SAVE_out_Dout      : in     std_logic_vector(31 downto 0); -- data written to savestate
+      SAVE_out_Din       : out    std_logic_vector(63 downto 0); -- data read from savestate
+      SAVE_out_Dout      : in     std_logic_vector(63 downto 0); -- data written to savestate
       SAVE_out_Adr       : out    std_logic_vector(25 downto 0); -- all addresses are DWORD addresses!
       SAVE_out_rnw       : out    std_logic;                     -- read = 1, write = 0
       SAVE_out_ena       : out    std_logic;                     -- one cycle high for each action
@@ -136,6 +140,13 @@ architecture arch of gba_top is
    signal sleep_savestate      : std_logic;
    
    signal cpu_jump             : std_logic;
+   
+   signal savestate_savestate  : std_logic := '0';
+   signal savestate_loadstate  : std_logic := '0';
+   signal savestate_address    : integer;
+   signal savestate_busy       : std_logic;
+   
+   signal sleep_rewind         : std_logic;
    
    -- cheats
    signal Cheats_BusAddr       : std_logic_vector(27 downto 0);
@@ -232,8 +243,10 @@ architecture arch of gba_top is
    signal cpu_IRP  : std_logic := '0';
    signal new_halt : std_logic := '0';
    
-   signal PC_in_BIOS : std_logic;
-   signal lastread   : std_logic_vector(31 downto 0);
+   signal PC_in_BIOS      : std_logic;
+   signal lastread        : std_logic_vector(31 downto 0);
+   signal lastread_dma    : std_logic_vector(31 downto 0);
+   signal last_access_dma : std_logic := '0';
    
    signal new_cycles           : unsigned(7 downto 0);
    signal new_cycles_valid     : std_logic;      
@@ -338,7 +351,20 @@ begin
    mem_bus_ena  <=  debug_bus_ena         when debug_bus_active = '1' else cpu_bus_ena  when cpu_bus_ena = '1' else dma_bus_ena; 
    mem_bus_acc  <=  debug_bus_acc         when debug_bus_active = '1' else cpu_bus_acc  when cpu_bus_ena = '1' else dma_bus_acc;
    mem_bus_dout <=  debug_bus_dout        when debug_bus_active = '1' else cpu_bus_dout when cpu_bus_ena = '1' else dma_bus_dout;
-                                                                         
+       
+   process (clk100)
+   begin       
+      if rising_edge(clk100) then
+      
+         if (cpu_done = '1') then
+            last_access_dma <= '0';
+         elsif (dma_bus_ena = '1') then
+            last_access_dma <= '1';
+         end if;
+
+      end if;
+   end process;
+                      
    ------------- debug bus
    process (clk100)
    begin
@@ -389,7 +415,6 @@ begin
       Softmap_GBA_WRam_ADDR    => Softmap_GBA_WRam_ADDR,  
       Softmap_GBA_FLASH_ADDR   => Softmap_GBA_FLASH_ADDR, 
       Softmap_GBA_EEPROM_ADDR  => Softmap_GBA_EEPROM_ADDR,
-      Softmap_SaveState_ADDR   => Softmap_SaveState_ADDR, 
       is_simu                  => is_simu                
    )
    port map
@@ -400,8 +425,10 @@ begin
       
       load_done           => load_done,
                         
-      save                => save_state,
-      load                => load_state,
+      save                => savestate_savestate,
+      load                => savestate_loadstate,
+      savestate_address   => savestate_address,
+      savestate_busy      => savestate_busy,      
       
       cpu_jump            => cpu_jump,
       
@@ -409,6 +436,7 @@ begin
       loading_savestate   => loading_savestate,
       saving_savestate    => saving_savestate,
       sleep_savestate     => sleep_savestate,
+      bus_ena_in          => mem_bus_ena,
       
       gb_bus              => gb_bus,
        
@@ -428,6 +456,33 @@ begin
       bus_out_ena         => SAVE_out_ena,   
       bus_out_active      => SAVE_out_active,
       bus_out_done        => SAVE_out_done  
+   );
+   
+   igba_statemanager : entity work.gba_statemanager
+   generic map
+   (
+      Softmap_SaveState_ADDR   => Softmap_SaveState_ADDR,
+      Softmap_Rewind_ADDR      => Softmap_Rewind_ADDR   
+   )
+   port map
+   (
+      clk100              => clk100,
+      gb_on               => gbaon,
+
+      rewind_on           => rewind_on,    
+      rewind_active       => rewind_active,
+      
+      savestate_number    => savestate_number,
+      save                => save_state,
+      load                => load_state,
+      
+      sleep_rewind        => sleep_rewind,
+      vsync               => vblank_trigger,       
+      
+      request_savestate   => savestate_savestate,
+      request_loadstate   => savestate_loadstate,
+      request_address     => savestate_address,  
+      request_busy        => savestate_busy     
    );
    
    igba_cheats : entity work.gba_cheats
@@ -541,6 +596,8 @@ begin
       
       PC_in_BIOS           => PC_in_BIOS,
       lastread             => lastread,
+      lastread_dma         => lastread_dma,
+      last_access_dma      => last_access_dma,
       
       dma_eepromcount      => dma_eepromcount,
       flash_1m             => GBA_flash_1m,
@@ -601,6 +658,7 @@ begin
       new_cycles_valid    => new_cycles_valid,
       
       IRP_DMA             => IRP_DMA,
+      lastread_dma        => lastread_dma,
       
       dma_on              => dma_on,
       CPU_bus_idle        => CPU_bus_idle,
@@ -819,7 +877,9 @@ begin
    iREG_POSTFLG : entity work.eProcReg_gba generic map (work.pReg_gba_system.POSTFLG) port map  (clk100, gb_bus, REG_POSTFLG, REG_POSTFLG);
    iREG_HALTCNT : entity work.eProcReg_gba generic map (work.pReg_gba_system.HALTCNT) port map  (clk100, gb_bus, (REG_HALTCNT'range => '0'), REG_HALTCNT, REG_HALTCNT_written);
 
-   iSAVESTATE_IRP : entity work.eProcReg_gba generic map (REG_SAVESTATE_IRP ) port map (clk100, savestate_bus, IRPFLags , SAVESTATE_IRP);
+   iSAVESTATE_IRP   : entity work.eProcReg_gba generic map (REG_SAVESTATE_IRP  ) port map (clk100, savestate_bus, IRPFLags , SAVESTATE_IRP);
+   
+   iSAVESTATE_DUMMY : entity work.eProcReg_gba generic map (REG_SAVESTATE_DUMMY) port map (clk100, savestate_bus, "0" , open);
 
    debug_irq(15 downto 0) <= IRPFLags;
    debug_irq(16) <= REG_IME(0);
@@ -906,7 +966,8 @@ begin
          end if;
          
          gba_step <= '0';
-         if (DEBUG_NOCPU = '0' and sleep_savestate = '0' and sleep_cheats = '0' and (GBA_lockspeed = '0' or GBA_cputurbo = '1' or cycles_ahead < unsigned(CyclePrecalc))) then
+         if (DEBUG_NOCPU = '0' and sleep_savestate = '0' and sleep_cheats = '0' and sleep_rewind = '0' and 
+            (GBA_lockspeed = '0' or GBA_cputurbo = '1' or cycles_ahead < unsigned(CyclePrecalc))) then
             gba_step <= '1';
          end if;
       

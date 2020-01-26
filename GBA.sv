@@ -127,6 +127,7 @@ module emu
 assign ADC_BUS  = 'Z;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 
+
 assign AUDIO_S   = 1;
 assign AUDIO_MIX = status[8:7];
 
@@ -162,7 +163,7 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 // 0         1         2         3
 // 01234567890123456789012345678901
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXX  XXXXXXXXXXXXXXXX
+// XXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -181,6 +182,7 @@ parameter CONF_STR = {
 	"h4H3-;",
 	"O1,Aspect Ratio,3:2,16:9;",
 	"O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"O9A,Desaturate,Off,Level 1,Level 2,Level 3;",
    "OOQ,Shader Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4;",
    "OJ,Flickerblend,Off,On;",
    "OK,Spritelimit,Off,On;",
@@ -188,13 +190,14 @@ parameter CONF_STR = {
 	"-;",
 	"OM,Serial Mode,Off,LLAPI;",
 	"OEF,Storage,Auto,SDRAM,DDR3;",
-	"OL,Fast Forward,Off,On;",
+	"OL,Fast Forward,Off,On;",	
 	"O5,Pause,Off,On;",
 	"H2OG,Turbo,Off,On;",
 	"OB,Sync core to video,Off,On;",
+	"OR,Rewind Capture,Off,On;",
 	"R0,Reset;",
-	"J1,A,B,L,R,Select,Start,FastForward;",
-	"jn,A,B,L,R,Select,Start,X;",
+	"J1,A,B,L,R,Select,Start,FastForward,Rewind;",
+	"jn,A,B,L,R,Select,Start,X,X;",
 	"I,",
 	"Save to state 1,",
 	"Restore state 1,",
@@ -229,10 +232,10 @@ wire        ioctl_wr;
 wire  [7:0] ioctl_index;
 reg         ioctl_wait = 0;
 
-wire [11:0] joy_usb;
+wire [12:0] joy_usb;
 wire [10:0] ps2_key;
-wire [21:0] gamma_bus;
 
+wire [21:0] gamma_bus;
 wire [15:0] sdram_sz;
 
 hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
@@ -409,7 +412,8 @@ gba_top
 	.Softmap_GBA_EEPROM_ADDR (0),                   //   8192 (8bit)  --   8 Kbyte Data for GBA EEProm
 	.Softmap_GBA_WRam_ADDR   (131072),              //  65536 (32bit) -- 256 Kbyte Data for GBA WRam Large
 	.Softmap_GBA_Gamerom_ADDR(65536+131072),        //   32MB of ROM
-	.Softmap_SaveState_ADDR  (0),                   // 262144 (32bit) -- ~1Mbyte Data for SaveState (separate memory)
+	.Softmap_SaveState_ADDR  (58720256),            // 65536 (64bit) -- ~512kbyte Data for SaveState (separate memory)
+	.Softmap_Rewind_ADDR     (33554432),            // 65536 qwords*64 -- 64*512 Kbyte Data for Savestates
 	.turbosound('1)                                 // sound buffer to play sound in turbo mode without sound pitched up
 )
 gba
@@ -431,6 +435,9 @@ gba
    .maxpixels(status[20]),
    .shade_mode(status[26:24]),
 	.specialmodule('0),
+   .rewind_on(status[27]),
+   .rewind_active(joy[11]),
+   .savestate_number(ss_base),
 
    .cheat_clear(gg_reset),
    .cheats_enabled(~status[6]),
@@ -509,6 +516,7 @@ always @(posedge clk_sys) begin
 				if(cart_id == {"ROCKY", 56'h00000000000000} ) 	begin sram_quirk <= 1;                          end // Rocky EU
 				if(cart_id == {"DBZ LGCYGOKU"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku US
 				if(cart_id == {"DRAGONBALL Z"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku EU
+				if(cart_id == {"DBZLEGACY1&2"} )                begin sram_quirk <= 1;                          end // 2 Games in 1 - Dragon Ball Z - The Legacy of Goku I & II (USA)
 				if(cart_id == {"DBZ TAIKETSU"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu US
 				if(cart_id == {"DRAGON BALLZ"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu EU
 				if(cart_id == {"TOPGUN CZ", 24'h000000} )     	begin sram_quirk <= 1;                          end // Top Gun - Combat Zones
@@ -731,8 +739,8 @@ wire [31:0] ddr_sdram_dout1, ddr_sdram_dout2, ddr_bus_dout;
 wire [15:0] ddr_bram_din;
 wire        ddr_sdram_ack, ddr_bus_ack, ddr_bram_ack;
 
-wire [31:0] ss_dout, ss_din;
-wire [19:2] ss_addr;
+wire [63:0] ss_dout, ss_din;
+wire [27:2] ss_addr;
 wire        ss_rnw, ss_req, ss_ack;
 
 assign DDRAM_CLK = clk_sys;
@@ -761,7 +769,7 @@ ddram ddram
 	.ch3_rnw(~bk_loading),
 	.ch3_ready(ddr_bram_ack),
 	
-	.ch4_addr({ss_base, ss_addr, 1'b0}),
+	.ch4_addr({ss_addr, 1'b0}),
 	.ch4_din(ss_din),
 	.ch4_dout(ss_dout),
 	.ch4_req(ss_req),
@@ -933,6 +941,7 @@ wire       scandoubler = (scale || forced_scandoubler);
 wire [7:0] r_in = {r,r[5:4]};
 wire [7:0] g_in = {g,g[5:4]};
 wire [7:0] b_in = {b,b[5:4]};
+
 
 video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 (
