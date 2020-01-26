@@ -942,6 +942,34 @@ wire [7:0] r_in = {r,r[5:4]};
 wire [7:0] g_in = {g,g[5:4]};
 wire [7:0] b_in = {b,b[5:4]};
 
+//wire [7:0] luma = r_in[7:3] + g_in[7:1] + g_in[7:2] + b_in[7:3];
+wire [7:0] luma = r_in[7:2] + g_in[7:1] + g_in[7:3] + b_in[7:3];
+
+wire [7:0] r_out, g_out, b_out;
+always_comb begin
+	case(status[10:9])
+		0: begin
+				r_out = r_in;
+				g_out = g_in;
+				b_out = b_in;
+			end
+		1: begin
+				r_out = r_in[7:1] + r_in[7:2] + luma[7:2];
+				g_out = g_in[7:1] + g_in[7:2] + luma[7:2];
+				b_out = b_in[7:1] + b_in[7:2] + luma[7:2];
+			end
+		2: begin
+				r_out = r_in[7:1] + luma[7:1];
+				g_out = g_in[7:1] + luma[7:1];
+				b_out = b_in[7:1] + luma[7:1];
+			end
+		3: begin
+				r_out = luma[7:1] + luma[7:2] + r_in[7:2];
+				g_out = luma[7:1] + luma[7:2] + g_in[7:2];
+				b_out = luma[7:1] + luma[7:2] + b_in[7:2];
+			end
+	endcase
+end
 
 video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 (
@@ -958,9 +986,9 @@ video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 	.VSync(vs),
 	.HBlank(hbl),
 	.VBlank(vbl),
-	.R(r_in),
-	.G(g_in),
-	.B(b_in)
+	.R(r_out),
+	.G(g_out),
+	.B(b_out)
 );
 
 
