@@ -162,7 +162,7 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 // 0         1         2         3
 // 01234567890123456789012345678901
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXX  XXXXXXXXXXXXXXXX
+// XXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -181,6 +181,7 @@ parameter CONF_STR = {
 	"h4H3-;",
 	"O1,Aspect Ratio,3:2,16:9;",
 	"O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"O9A,Desaturate,Off,Level 1,Level 2,Level 3;",
    "OOQ,Shader Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4;",
    "OJ,Flickerblend,Off,On;",
    "OK,Spritelimit,Off,On;",
@@ -188,7 +189,6 @@ parameter CONF_STR = {
 	"-;",
 	"OM,Serial Mode,Off,LLAPI;",
 	"OEF,Storage,Auto,SDRAM,DDR3;",
-	"OL,Fast Forward,Off,On;",
 	"O5,Pause,Off,On;",
 	"H2OG,Turbo,Off,On;",
 	"OB,Sync core to video,Off,On;",
@@ -391,13 +391,13 @@ always @(posedge clk_sys) begin : ffwd
 	if ((last_ffw & ~joy[10])) begin // 100mhz clock, 0.2 seconds
 		ff_was_held <= 0;
 
-		if (ff_count < 10000000 && ~ff_was_held && status[21]) begin
+		if (ff_count < 10000000 && ~ff_was_held) begin
 			ff_was_held <= 1;
 			ff_latch <= 1;
 		end
 	end
 
-	fast_forward <= (joy[10] | ff_latch) & ~force_turbo & status[21];
+	fast_forward <= (joy[10] | ff_latch) & ~force_turbo;
 	pause <= force_pause | status[5];
 	cpu_turbo <= ((status[16] & ~fast_forward) | force_turbo) & ~pause;
 end
@@ -934,6 +934,35 @@ wire [7:0] r_in = {r,r[5:4]};
 wire [7:0] g_in = {g,g[5:4]};
 wire [7:0] b_in = {b,b[5:4]};
 
+//wire [7:0] luma = r_in[7:3] + g_in[7:1] + g_in[7:2] + b_in[7:3];
+wire [7:0] luma = r_in[7:2] + g_in[7:1] + g_in[7:3] + b_in[7:3];
+
+wire [7:0] r_out, g_out, b_out;
+always_comb begin
+	case(status[10:9])
+		0: begin
+				r_out = r_in;
+				g_out = g_in;
+				b_out = b_in;
+			end
+		1: begin
+				r_out = r_in[7:1] + r_in[7:2] + luma[7:2];
+				g_out = g_in[7:1] + g_in[7:2] + luma[7:2];
+				b_out = b_in[7:1] + b_in[7:2] + luma[7:2];
+			end
+		2: begin
+				r_out = r_in[7:1] + luma[7:1];
+				g_out = g_in[7:1] + luma[7:1];
+				b_out = b_in[7:1] + luma[7:1];
+			end
+		3: begin
+				r_out = luma[7:1] + luma[7:2] + r_in[7:2];
+				g_out = luma[7:1] + luma[7:2] + g_in[7:2];
+				b_out = luma[7:1] + luma[7:2] + b_in[7:2];
+			end
+	endcase
+end
+
 video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 (
 	.*,
@@ -949,9 +978,9 @@ video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 	.VSync(vs),
 	.HBlank(hbl),
 	.VBlank(vbl),
-	.R(r_in),
-	.G(g_in),
-	.B(b_in)
+	.R(r_out),
+	.G(g_out),
+	.B(b_out)
 );
 
 
