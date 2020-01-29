@@ -66,6 +66,8 @@ entity gba_memorymux is
                                     
       PC_in_BIOS           : in     std_logic;
       lastread             : in     std_logic_vector(31 downto 0);
+      lastread_dma         : in     std_logic_vector(31 downto 0);
+      last_access_dma      : in     std_logic;
                                     
       dma_eepromcount      : in     unsigned(16 downto 0);
       flash_1m             : in     std_logic;
@@ -418,7 +420,7 @@ begin
          unread_next     <= '0';
          
          cache_read_enable <= '0';
-         
+
          case state is
          
             when IDLE =>
@@ -446,8 +448,10 @@ begin
                            when x"0" => 
                               if (PC_in_BIOS = '0') then
                                  if (unsigned(mem_bus_Adr) < 16#4000#) then
-                                    --rotate_data <= x"E3A02004"; -- only applies for one situation!
-                                    --rotate_data <= x"E55EC002"; -- only applies for one situation!
+                                    --rotate_data <= x"E3A02004"; -- only applies for one situation! -> after irq
+                                    --rotate_data <= x"E55EC002"; -- only applies for one situation! -> after swi
+                                    --rotate_data <= x"E129F000"; -- only applies for one situation! -> after startup
+                                    --rotate_data <= x"E25EF004"; -- only applies for one situation! -> while irq
                                     rotate_data <= bios_data_last;
                                     state       <= ROTATE;
                                  else
@@ -831,7 +835,11 @@ begin
                state       <= ROTATE; 
                
             when READ_UNREADABLE =>
-               rotate_data <= lastread;
+               if (last_access_dma = '1') then
+                  rotate_data <= lastread_dma;
+               else
+                  rotate_data <= lastread;
+               end if;
                state       <= ROTATE; 
                unread_next <= '1';               
                

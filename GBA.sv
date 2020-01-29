@@ -162,7 +162,7 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 // 0         1         2         3
 // 01234567890123456789012345678901
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXXXXXXXXXXXXXXXXXXXX
+// XXXXXXXXX  XXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -181,20 +181,21 @@ parameter CONF_STR = {
 	"h4H3-;",
 	"O1,Aspect Ratio,3:2,16:9;",
 	"O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-	"O9A,Desaturate,Off,Level 1,Level 2,Level 3;",
-   "OOQ,Shader Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4;",
+   "OOQ,Modify Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4,75%,50%,25%;",
    "OJ,Flickerblend,Off,On;",
    "OK,Spritelimit,Off,On;",
 	"O78,Stereo Mix,None,25%,50%,100%;", 
 	"-;",
 	"OM,Serial Mode,Off,LLAPI;",
+	"OL,Fast Forward,Off,On;",
 	"OEF,Storage,Auto,SDRAM,DDR3;",
-	"O5,Pause,Off,On;",
+	"O5,Pause when OSD is open,Off,On;",
 	"H2OG,Turbo,Off,On;",
 	"OB,Sync core to video,Off,On;",
+	"OR,Rewind Capture,Off,On;",
 	"R0,Reset;",
-	"J1,A,B,L,R,Select,Start,FastForward;",
-	"jn,A,B,L,R,Select,Start,X;",
+	"J1,A,B,L,R,Select,Start,FastForward,Rewind;",
+	"jn,A,B,L,R,Select,Start,X,X;",
 	"I,",
 	"Save to state 1,",
 	"Restore state 1,",
@@ -229,7 +230,7 @@ wire        ioctl_wr;
 wire  [7:0] ioctl_index;
 reg         ioctl_wait = 0;
 
-wire [11:0] joy_usb;
+wire [12:0] joy_usb;
 wire [10:0] ps2_key;
 wire [21:0] gamma_bus;
 
@@ -391,14 +392,14 @@ always @(posedge clk_sys) begin : ffwd
 	if ((last_ffw & ~joy[10])) begin // 100mhz clock, 0.2 seconds
 		ff_was_held <= 0;
 
-		if (ff_count < 10000000 && ~ff_was_held) begin
+		if (ff_count < 10000000 && ~ff_was_held && status[21]) begin
 			ff_was_held <= 1;
 			ff_latch <= 1;
 		end
 	end
 
-	fast_forward <= (joy[10] | ff_latch) & ~force_turbo;
-	pause <= force_pause | status[5];
+	fast_forward <= (joy[10] | ff_latch) & ~force_turbo & status[21];
+	pause <= force_pause | (status[5] & OSD_STATUS);
 	cpu_turbo <= ((status[16] & ~fast_forward) | force_turbo) & ~pause;
 end
 
@@ -409,7 +410,8 @@ gba_top
 	.Softmap_GBA_EEPROM_ADDR (0),                   //   8192 (8bit)  --   8 Kbyte Data for GBA EEProm
 	.Softmap_GBA_WRam_ADDR   (131072),              //  65536 (32bit) -- 256 Kbyte Data for GBA WRam Large
 	.Softmap_GBA_Gamerom_ADDR(65536+131072),        //   32MB of ROM
-	.Softmap_SaveState_ADDR  (0),                   // 262144 (32bit) -- ~1Mbyte Data for SaveState (separate memory)
+	.Softmap_SaveState_ADDR  (58720256),            // 65536 (64bit) -- ~512kbyte Data for SaveState (separate memory)
+	.Softmap_Rewind_ADDR     (33554432),            // 65536 qwords*64 -- 64*512 Kbyte Data for Savestates
 	.turbosound('1)                                 // sound buffer to play sound in turbo mode without sound pitched up
 )
 gba
@@ -429,8 +431,11 @@ gba
    .load_state(ss_load),
    .interframe_blend(status[19]),
    .maxpixels(status[20]),
-   .shade_mode(status[26:24]),
+   .shade_mode(shadercolors),
 	.specialmodule('0),
+   .rewind_on(status[27]),
+   .rewind_active(joy[11]),
+   .savestate_number(ss_base),
 
    .cheat_clear(gg_reset),
    .cheats_enabled(~status[6]),
@@ -509,6 +514,7 @@ always @(posedge clk_sys) begin
 				if(cart_id == {"ROCKY", 56'h00000000000000} ) 	begin sram_quirk <= 1;                          end // Rocky EU
 				if(cart_id == {"DBZ LGCYGOKU"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku US
 				if(cart_id == {"DRAGONBALL Z"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - The Legacy of Goku EU
+				if(cart_id == {"DBZLEGACY1&2"} )                begin sram_quirk <= 1;                          end // 2 Games in 1 - Dragon Ball Z - The Legacy of Goku I & II (USA)
 				if(cart_id == {"DBZ TAIKETSU"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu US
 				if(cart_id == {"DRAGON BALLZ"} )              	begin sram_quirk <= 1;                          end // Dragon Ball Z - Taiketsu EU
 				if(cart_id == {"TOPGUN CZ", 24'h000000} )     	begin sram_quirk <= 1;                          end // Top Gun - Combat Zones
@@ -615,14 +621,14 @@ LLAPI llapi2
 
 // "J1,A,B,L,R,Select,Start,Turbo;",
 
-wire [11:0] joy_ll_a;
+wire [12:0] joy_ll_a;
 always_comb begin
 	// map for saturn controller
 	// use L and R instead of top face buttons
 	// no select button so use Z
 	if (llapi_type == 3 || llapi_type == 8) begin
 		joy_ll_a = { 1'd0,
-			llapi_buttons[3],                                      // Fast Forward
+			llapi_buttons[2],  llapi_buttons[3],                   // Rewind Fast-Forward
 			llapi_buttons[5],  llapi_buttons[6],                   // Start Select
 			llapi_buttons[9] | llapi_buttons[7], llapi_buttons[8], // R L
 			llapi_buttons[0],  llapi_buttons[1],                   // B A
@@ -630,7 +636,7 @@ always_comb begin
 		};
 	end else begin
 		joy_ll_a = { 1'd0,
-			llapi_buttons[3],                    // Fast Forward
+			llapi_buttons[2],  llapi_buttons[3], // Rewind Fast-Forward
 			llapi_buttons[5],  llapi_buttons[4], // Start Select
 			llapi_buttons[7],  llapi_buttons[6], // RT LT
 			llapi_buttons[0],  llapi_buttons[1], // B A
@@ -639,14 +645,14 @@ always_comb begin
 	end
 end
 
-wire [11:0] joy_ll_b;
+wire [12:0] joy_ll_b;
 always_comb begin
 	// map for saturn controller
 	// use L and R instead of top face buttons
 	// no select button so use Z
 	if (llapi_type2 == 3 || llapi_type2 == 8) begin
 		joy_ll_b = { 1'd0,
-			llapi_buttons2[3],                                     // Fast Forward
+			llapi_buttons2[2],  llapi_buttons2[3],                    // Rewind Fast-Forward
 			llapi_buttons2[5],  llapi_buttons2[6],                    // Start Select
 			llapi_buttons2[9] | llapi_buttons2[7], llapi_buttons2[8], // R L
 			llapi_buttons2[0],  llapi_buttons2[1],                    // B A
@@ -654,7 +660,7 @@ always_comb begin
 		};
 	end else begin
 		joy_ll_b = { 1'd0,
-			llapi_buttons2[3],                     // Fast Forward
+			llapi_buttons2[2],  llapi_buttons2[3], // Rewind Fast-Forward
 			llapi_buttons2[5],  llapi_buttons2[4], // Start Select
 			llapi_buttons2[7],  llapi_buttons2[6], // RT LT
 			llapi_buttons2[0],  llapi_buttons2[1], // B A
@@ -665,7 +671,7 @@ end
 
 wire llapi_osd = (llapi_buttons[26] && llapi_buttons[5] && llapi_buttons[0]) || (llapi_buttons2[26] && llapi_buttons2[5] && llapi_buttons2[0]);
 
-wire [11:0] joy = joy_usb | joy_ll_a | joy_ll_b;
+wire [12:0] joy = joy_usb | joy_ll_a | joy_ll_b;
 
 ////////////////////////////  MEMORY  ///////////////////////////////////
 
@@ -731,8 +737,8 @@ wire [31:0] ddr_sdram_dout1, ddr_sdram_dout2, ddr_bus_dout;
 wire [15:0] ddr_bram_din;
 wire        ddr_sdram_ack, ddr_bus_ack, ddr_bram_ack;
 
-wire [31:0] ss_dout, ss_din;
-wire [19:2] ss_addr;
+wire [63:0] ss_dout, ss_din;
+wire [27:2] ss_addr;
 wire        ss_rnw, ss_req, ss_ack;
 
 assign DDRAM_CLK = clk_sys;
@@ -761,7 +767,7 @@ ddram ddram
 	.ch3_rnw(~bk_loading),
 	.ch3_ready(ddr_bram_ack),
 	
-	.ch4_addr({ss_base, ss_addr, 1'b0}),
+	.ch4_addr({ss_addr, 1'b0}),
 	.ch4_din(ss_din),
 	.ch4_dout(ss_dout),
 	.ch4_req(ss_req),
@@ -939,7 +945,7 @@ wire [7:0] luma = r_in[7:2] + g_in[7:1] + g_in[7:3] + b_in[7:3];
 
 wire [7:0] r_out, g_out, b_out;
 always_comb begin
-	case(status[10:9])
+	case(desatcolors)
 		0: begin
 				r_out = r_in;
 				g_out = g_in;
@@ -955,12 +961,27 @@ always_comb begin
 				g_out = g_in[7:1] + luma[7:1];
 				b_out = b_in[7:1] + luma[7:1];
 			end
-		3: begin
+      3: begin
 				r_out = luma[7:1] + luma[7:2] + r_in[7:2];
 				g_out = luma[7:1] + luma[7:2] + g_in[7:2];
 				b_out = luma[7:1] + luma[7:2] + b_in[7:2];
 			end
 	endcase
+end
+
+////////////////////////////  Color options  //////////////////////////////////
+
+reg [2:0] shadercolors;
+reg [1:0] desatcolors;
+always @(posedge clk_sys) begin
+	if(status[26:24] < 5) begin
+      shadercolors = status[26:24];
+      desatcolors  = 0;
+   end
+   else begin
+      shadercolors = 0;
+      desatcolors  = status[26:24] - 4;
+   end		
 end
 
 video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer

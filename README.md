@@ -37,9 +37,10 @@ PLEASE do not report errors without testing with the original BIOS
 - FastForward - speed up game by factor 2-4
 - CPU Turbomode - give games additional CPU power
 - Flickerblend - turn on for games like F-Zero, Mario Kart or NES Classics to prevent flickering effects
-- Spritelimit - turn on to prevent wrong sprites for games that rely on the limit (opt-in as only 1 known game)
+- Spritelimit - turn on to prevent wrong sprites for games that rely on the limit (opt-in)
 - Cheats
-- Shadercolors
+- Color optimizations: shader colors and desaturate
+- Rewind: go back up to 60 seconds in time
 
 # Savestates
 Core provides 4 slots to save the state. The first slot gets saved to disk and automatically loaded (but not applied)
@@ -51,6 +52,15 @@ Hot keys for save states:
 - Alt-F1..F4 - save the state
 - F1...F4 - restore
 
+# Rewind
+To use rewind, turn on the OSD Option "Rewind Capture" and map the rewind button.
+You may have to restart the game for the function to work properly.
+Attention: Rewind capture will slow down your game by about 0.5% and may lead to light audio stutter.
+
+# Spritelimit
+Currently there are only few games known that produce glitches without sprite pixel limit:
+- Gunstar Super Heroes
+- Famicon Mini Series Vol21 - Vol30
 
 # Not included
 - Multiplayer features like Serial
@@ -73,3 +83,15 @@ Timer    |       936 |   445     |  511 |   440 |  464
 Carry    |        93 |    93     |   93 |    93 |   93
 BIOSMath |       625 |   625     |  625 |   425 |  625
 DMATests |      1256 |  1248     | 1232 |  1008 | 1064
+
+A complex CPU only testuite can be found here: https://github.com/jsmolka/gba-suite
+There are a total of 765 CPU Testcases included. 
+The GBA Core does pass all these test.
+
+# Information for developers
+
+How to simulate:
+https://github.com/MiSTer-devel/GBA_MiSTer/tree/master/sim
+
+How to implement a GPIO module:
+https://github.com/MiSTer-devel/GBA_MiSTer/blob/master/gpio_readme.md
