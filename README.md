@@ -14,10 +14,16 @@ Original GBA BIOS can be placed to GBA folder with name boot.rom
 
 PLEASE do not report errors without testing with the original BIOS
 
+Homebrew games are sometimes not supported by the official BIOS, 
+because the BIOS checks for Nintendo Logo included in the ROM, which is protected by copyright.
+To use these ROMs without renaming or removing the the boot.rom, 
+you can activate the "Homebrew BIOS" settings in OSD.
+As the BIOS is already replaced at boot time, you must save this settings and hard reset/reload the GBA core.
+
 # Games with crashes/hang
 - Madden06/07: graphic messed up at coin toss
 
-# Games that are unplayable because of catridge hardware missing
+# Games that are unplayable because of cartridge hardware missing
 - Boktai 1/2/Shin Bokura no Taiyou(Japanese Boktai)
 - Warioware Twisted
 - Yoshi's Universal Gravitation
@@ -56,6 +62,7 @@ Hot keys for save states:
 To use rewind, turn on the OSD Option "Rewind Capture" and map the rewind button.
 You may have to restart the game for the function to work properly.
 Attention: Rewind capture will slow down your game by about 0.5% and may lead to light audio stutter.
+Rewind capture is not compatible to "Pause when OSD is open", so pause is ignored when Rewind capture is on.
 
 # Spritelimit
 Currently there are only few games known that produce glitches without sprite pixel limit:
@@ -70,23 +77,39 @@ Currently there are only few games known that produce glitches without sprite pi
 
 # Accuracy
 
+(Status 03.02.2020)
+
+>> Attention: the following comparisons are NOT intended for proving any solution is better than the other.
+>> This is solely here for the purpose of showing the status compared to other great emulators available.
+>> It is not unusual that an emulator can play games fine and still fail tests. 
+>> Furthermore some of these tests are new and not yet addressed by most emulators.
+
 There is great testsuite you can get from here: https://github.com/mgba-emu/suite
 It tests out correct Memory, Timer, DMA, CPU, BIOS behavior and also instruction timing. It works 100% on the real GBA.
-The suite itself has several thousand single tests. Here is a comparison with mGBA, VBA-M and Higan
+The suite itself has several thousand single tests.
 
-Testname | TestCount | Mister GBA| mGBA | VBA-M | Higan
----------|-----------|-----------|------|-------|-------
-Memory   |      1552 |  1552     | 1552 |  1337 | 1552
-IOREAD   |       123 |   123     |  116 |   100 |  123
-Timing   |      1660 |  1554     | 1520 |   628 | 1424
-Timer    |       936 |   445     |  511 |   440 |  464
-Carry    |        93 |    93     |   93 |    93 |   93
-BIOSMath |       625 |   625     |  625 |   425 |  625
-DMATests |      1256 |  1248     | 1232 |  1008 | 1064
+Testname      | TestCount | Mister GBA| mGBA | VBA-M | Higan
+--------------|-----------|-----------|------|-------|-------
+Memory        |      1552 |  1552     | 1552 |  1338 | 1552
+IOREAD        |       123 |   123     |  116 |   100 |  123
+Timing        |      1660 |  1554     | 1540 |   692 | 1424
+Timer         |       936 |   445     |  610 |   440 |  457
+Timer IRQ     |        90 |    65     |   70 |     8 |   36
+Shifter       |       140 |   140     |  140 |   132 |  132
+Carry         |        93 |    93     |   93 |    93 |   93
+BIOSMath      |       625 |   625     |  625 |   625 |  625
+DMATests      |      1256 |  1248     | 1232 |  1032 | 1136
+EdgeCase      |        10 |     3     |    7 |     3 |    1
+Layer Toggle  |         1 |  pass     | pass |  pass | fail 
+OAM Update    |         1 |  fail     | fail |  fail | fail
+
 
 A complex CPU only testuite can be found here: https://github.com/jsmolka/gba-suite
-There are a total of 765 CPU Testcases included. 
-The GBA Core does pass all these test.
+
+Testname | Mister GBA| mGBA | VBA-M | Higan
+---------|-----------|------|-------|-------
+ARM      |  Pass     | Fail |  Fail |  Fail
+THUMB    |  Pass     | Fail |  Fail |  Fail
 
 # Information for developers
 
