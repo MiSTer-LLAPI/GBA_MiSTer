@@ -158,11 +158,11 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 
 ////////////////////////////  HPS I/O  //////////////////////////////////
 
-// Status Bit Map:
-// 0         1         2         3
-// 01234567890123456789012345678901
-// 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXX  XXXXXXXXXXXXXXXXXX
+// Status Bit Map: (0..31 => "O", 32..63 => "o")
+// 0         1         2         3         4         5         6   
+// 0123456789012345678901234567890123456789012345678901234567890123
+// 0123456789ABCDEFGHIJKLMNOPQRSTUV0123456789ABCDEFGHIJKLMNOPQRSTUV
+// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -189,10 +189,13 @@ parameter CONF_STR = {
 	"OM,Serial Mode,Off,LLAPI;",
 	"OL,Fast Forward,Off,On;",
 	"OEF,Storage,Auto,SDRAM,DDR3;",
-	"O5,Pause when OSD is open,Off,On;",
+	"D5O5,Pause when OSD is open,Off,On;",
 	"H2OG,Turbo,Off,On;",
 	"OB,Sync core to video,Off,On;",
 	"OR,Rewind Capture,Off,On;",
+	"OA,RTC+Gyro+Solar,Off,On;",
+	"H6OTV,Solar Sensor,0%,15%,30%,42%,55%,70%,85%,100%;",
+	"O9,Tilt on Analogstick,Off,On;",
 	"OS,Homebrew BIOS(Reset!),Off,On;",
 	"R0,Reset;",
 	"J1,A,B,L,R,Select,Start,FastForward,Rewind;",
@@ -211,7 +214,7 @@ parameter CONF_STR = {
 
 wire  [1:0] buttons;
 wire [31:0] status;
-wire [15:0] status_menumask = {cart_loaded, |cart_type, force_turbo, ~gg_active, ~bk_ena};
+wire [15:0] status_menumask = {~status[10], status[27], cart_loaded, |cart_type, force_turbo, ~gg_active, ~bk_ena};
 wire        forced_scandoubler;
 reg  [31:0] sd_lba;
 reg         sd_rd = 0;
@@ -237,6 +240,8 @@ wire [21:0] gamma_bus;
 
 wire [15:0] sdram_sz;
 
+wire [15:0] joystick_analog_0;
+
 hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 (
 	.clk_sys(clk_sys),
@@ -250,7 +255,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.ps2_key(ps2_key),
 
 	.status(status),
-	.status_in({status[31:17],1'b0,status[15:0]}),
+	.status_in({status[31:17],1'b0,status[15:11],1'b0,1'b0,status[8:0]}),
 	.status_set(cart_download),	
 	.status_menumask(status_menumask),
 	.info_req(ss_info_req),
@@ -277,7 +282,9 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.img_size(img_size),
 
 	.sdram_sz(sdram_sz),
-	.gamma_bus(gamma_bus)
+	.gamma_bus(gamma_bus),
+   
+   .joystick_analog_0(joystick_analog_0)
 );
 
 //////////////////////////  ROM DETECT  /////////////////////////////////
@@ -433,7 +440,9 @@ gba
    .interframe_blend(status[19]),
    .maxpixels(status[20]),
    .shade_mode(shadercolors),
-	.specialmodule('0),
+	.specialmodule(status[10]),
+	.solar_in(status[31:29]),
+	.tilt(status[9]),
    .rewind_on(status[27]),
    .rewind_active(status[27] & joy[11]),
    .savestate_number(ss_base),
@@ -483,6 +492,8 @@ gba
 	.KeyDown(joy[2]),
 	.KeyR(joy[7]),
 	.KeyL(joy[6]),
+	.AnalogTiltX(joystick_analog_0[7:0]),
+	.AnalogTiltY(joystick_analog_0[15:8]),
 	
 	.pixel_out_addr(pixel_addr),      // integer range 0 to 38399;       -- address for framebuffer 
 	.pixel_out_data(pixel_data),      // RGB data for framebuffer 

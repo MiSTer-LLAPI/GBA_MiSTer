@@ -20,17 +20,6 @@ To use these ROMs without renaming or removing the the boot.rom,
 you can activate the "Homebrew BIOS" settings in OSD.
 As the BIOS is already replaced at boot time, you must save this settings and hard reset/reload the GBA core.
 
-# Games with crashes/hang
-- Madden06/07: graphic messed up at coin toss
-
-# Games that are unplayable because of cartridge hardware missing
-- Boktai 1/2/Shin Bokura no Taiyou(Japanese Boktai)
-- Warioware Twisted
-- Yoshi's Universal Gravitation
-- Bouken Yuuki Pluster World - Plust Gate/EX
-- Sennen Kazoku, Gachasute (RTC)
-- Koro Koro Puzzle
-
 # Status
 ~1600 games tested until ingame:
 - 99% without major issues (no crash, playable)
@@ -47,6 +36,9 @@ As the BIOS is already replaced at boot time, you must save this settings and ha
 - Cheats
 - Color optimizations: shader colors and desaturate
 - Rewind: go back up to 60 seconds in time
+- Tilt: enable in OSD and use analog stick (map stick in Mister Main before)
+- Solar Sensor: enable in OSD and Set brightness in OSD
+- Gyro: enable in OSD and use analog stick (map stick in Mister Main before)
 
 # Savestates
 Core provides 4 slots to save the state. The first slot gets saved to disk and automatically loaded (but not applied)
@@ -62,7 +54,7 @@ Hot keys for save states:
 To use rewind, turn on the OSD Option "Rewind Capture" and map the rewind button.
 You may have to restart the game for the function to work properly.
 Attention: Rewind capture will slow down your game by about 0.5% and may lead to light audio stutter.
-Rewind capture is not compatible to "Pause when OSD is open", so pause is ignored when Rewind capture is on.
+Rewind capture is not compatible to "Pause when OSD is open", so pause is disabled when Rewind capture is on.
 
 # Spritelimit
 Currently there are only few games known that produce glitches without sprite pixel limit:
@@ -71,9 +63,9 @@ Currently there are only few games known that produce glitches without sprite pi
 
 # Not included
 - Multiplayer features like Serial
-- Tilt/Gyro/Rumble/Sun sensor
-- RTC
+- RTC(fixed time is provided so games don't hang)
 - E-Reader support
+- other cartridge hardware
 
 # Accuracy
 
