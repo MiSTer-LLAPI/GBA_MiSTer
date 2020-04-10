@@ -18,7 +18,7 @@
 //  You should have received a copy of the GNU General Public License along
 //  with this program; if not, write to the Free Software Foundation, Inc.,
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-//============================================================================ 
+//============================================================================
 
 module emu
 (
@@ -159,10 +159,10 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 ////////////////////////////  HPS I/O  //////////////////////////////////
 
 // Status Bit Map: (0..31 => "O", 32..63 => "o")
-// 0         1         2         3         4         5         6   
+// 0         1         2         3         4         5         6
 // 0123456789012345678901234567890123456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// XXXXXXXXX  XXXXXXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -184,7 +184,7 @@ parameter CONF_STR = {
    "OOQ,Modify Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4,75%,50%,25%;",
    "OJ,Flickerblend,Off,On;",
    "OK,Spritelimit,Off,On;",
-	"O78,Stereo Mix,None,25%,50%,100%;", 
+	"O78,Stereo Mix,None,25%,50%,100%;",
 	"-;",
 	"OM,Serial Mode,Off,LLAPI;",
 	"OL,Fast Forward,Off,On;",
@@ -193,9 +193,7 @@ parameter CONF_STR = {
 	"H2OG,Turbo,Off,On;",
 	"OB,Sync core to video,Off,On;",
 	"OR,Rewind Capture,Off,On;",
-	"OA,RTC+Gyro+Solar,Off,On;",
 	"H6OTV,Solar Sensor,0%,15%,30%,42%,55%,70%,85%,100%;",
-	"O9,Tilt on Analogstick,Off,On;",
 	"OS,Homebrew BIOS(Reset!),Off,On;",
 	"R0,Reset;",
 	"J1,A,B,L,R,Select,Start,FastForward,Rewind;",
@@ -213,8 +211,8 @@ parameter CONF_STR = {
 };
 
 wire  [1:0] buttons;
-wire [31:0] status;
-wire [15:0] status_menumask = {~status[10], status[27], cart_loaded, |cart_type, force_turbo, ~gg_active, ~bk_ena};
+wire [63:0] status;
+wire [15:0] status_menumask = {~solar_quirk, status[27], cart_loaded, |cart_type, force_turbo, ~gg_active, ~bk_ena};
 wire        forced_scandoubler;
 reg  [31:0] sd_lba;
 reg         sd_rd = 0;
@@ -242,6 +240,8 @@ wire [15:0] sdram_sz;
 
 wire [15:0] joystick_analog_0;
 
+wire [32:0] RTC_time;
+
 hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 (
 	.clk_sys(clk_sys),
@@ -255,8 +255,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.ps2_key(ps2_key),
 
 	.status(status),
-	.status_in({status[31:17],1'b0,status[15:11],1'b0,1'b0,status[8:0]}),
-	.status_set(cart_download),	
+	.status_in({status[31:17],1'b0,status[15:10],1'b0,status[8:0]}),
+	.status_set(cart_download),
 	.status_menumask(status_menumask),
 	.info_req(ss_info_req),
 	.info(ss_info),
@@ -277,13 +277,15 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.sd_buff_din(sd_buff_din),
 	.sd_buff_wr(sd_buff_wr),
 
+	.TIMESTAMP(RTC_time),
+
 	.img_mounted(img_mounted),
 	.img_readonly(img_readonly),
 	.img_size(img_size),
 
 	.sdram_sz(sdram_sz),
 	.gamma_bus(gamma_bus),
-   
+
    .joystick_analog_0(joystick_analog_0)
 );
 
@@ -292,7 +294,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 reg code_download, bios_download, cart_download;
 always @(posedge clk_sys) begin
 	code_download <= ioctl_download & &ioctl_index;
-	bios_download <= ioctl_download & !ioctl_index; 
+	bios_download <= ioctl_download & !ioctl_index;
 	cart_download <= ioctl_download & ~&ioctl_index & |ioctl_index;
 end
 
@@ -303,10 +305,10 @@ reg        cart_loaded = 0;
 always @(posedge clk_sys) begin
 	reg [63:0] str;
 	reg old_download;
-	
+
 	old_download <= cart_download;
 	if (old_download & ~cart_download) last_addr <= ioctl_addr;
-	
+
 	if(~old_download & cart_download) begin
 		flash_1m <= 0;
 		cart_type <= ioctl_index[7:6];
@@ -363,7 +365,7 @@ always @(posedge clk_sys) begin
 				'h0C: begin ss_save <= pressed & alt; ss_load <= pressed & ~alt; ss_base <= 3; end // F4
 			endcase
 		end
-		
+
 		old_st <= status[18:17];
 		if(old_st[0] ^ status[17]) ss_save <= status[17];
 		if(old_st[1] ^ status[18]) ss_load <= status[18];
@@ -411,6 +413,13 @@ always @(posedge clk_sys) begin : ffwd
 	cpu_turbo <= ((status[16] & ~fast_forward) | force_turbo) & ~pause;
 end
 
+reg [79:0] time_dout = 41'd0;
+wire [79:0] time_din;
+assign time_din[42 + 32 +: 80 - (42 + 32)] = '0;
+
+wire has_rtc;
+reg RTC_load = 0;
+
 gba_top
 #(
    // assume: cart may have either flash or eeprom, not both! (need to verify)
@@ -440,20 +449,29 @@ gba
    .interframe_blend(status[19]),
    .maxpixels(status[20]),
    .shade_mode(shadercolors),
-	.specialmodule(status[10]),
+	.specialmodule(gpio_quirk),
 	.solar_in(status[31:29]),
-	.tilt(status[9]),
+	.tilt(tilt_quirk),
    .rewind_on(status[27]),
    .rewind_active(status[27] & joy[11]),
    .savestate_number(ss_base),
 
+   .RTC_timestampNew(RTC_time[32]),
+   .RTC_timestampIn(RTC_time[31:0]),
+   .RTC_timestampSaved(time_dout[42 +: 32]),
+   .RTC_savedtimeIn(time_dout[0 +: 42]),
+   .RTC_saveLoaded(RTC_load),
+   .RTC_timestampOut(time_din[42 +: 32]),
+   .RTC_savedtimeOut(time_din[0 +: 42]),
+   .RTC_inuse(has_rtc),
+
    .cheat_clear(gg_reset),
    .cheats_enabled(~status[6]),
-   .cheat_on(gg_valid),   
-   .cheat_in(gg_code), 
-   .cheats_active(gg_active), 
-   
-	.sdram_read_ena(sdram_req),       // triggered once for read request 
+   .cheat_on(gg_valid),
+   .cheat_in(gg_code),
+   .cheats_active(gg_active),
+
+	.sdram_read_ena(sdram_req),       // triggered once for read request
 	.sdram_read_done(sdram_ack),      // must be triggered once when sdram_read_data is valid after last read
 	.sdram_read_addr(sdram_addr),     // all addresses are DWORD addresses!
 	.sdram_read_data(sdram_dout1),    // data from last request, valid when done = 1
@@ -494,10 +512,10 @@ gba
 	.KeyL(joy[6]),
 	.AnalogTiltX(joystick_analog_0[7:0]),
 	.AnalogTiltY(joystick_analog_0[15:8]),
-	
-	.pixel_out_addr(pixel_addr),      // integer range 0 to 38399;       -- address for framebuffer 
-	.pixel_out_data(pixel_data),      // RGB data for framebuffer 
-	.pixel_out_we(pixel_we),          // new pixel for framebuffer 
+
+	.pixel_out_addr(pixel_addr),      // integer range 0 to 38399;       -- address for framebuffer
+	.pixel_out_data(pixel_data),      // RGB data for framebuffer
+	.pixel_out_we(pixel_we),          // new pixel for framebuffer
 
 	.sound_out_left(AUDIO_L),
 	.sound_out_right(AUDIO_R)
@@ -507,6 +525,9 @@ gba
 
 reg sram_quirk = 0;
 reg memory_remap_quirk = 0;
+reg gpio_quirk = 0;
+reg tilt_quirk = 0;
+reg solar_quirk = 0;
 always @(posedge clk_sys) begin
 	reg [95:0] cart_id;
 	reg old_download;
@@ -515,6 +536,9 @@ always @(posedge clk_sys) begin
 	if(~old_download && cart_download) begin
       sram_quirk         <= 0;
       memory_remap_quirk <= 0;
+      gpio_quirk         <= 0;
+      tilt_quirk         <= 0;
+      solar_quirk        <= 0;
    end
 
 	// TODO: better to use game ID (fixed 6 bytes after name of game) - less data to check.
@@ -566,6 +590,21 @@ always @(posedge clk_sys) begin
 				if(cart_id == {"MARIO BROS.", 8'h00} )      	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 11 - Mario Bros.
 				if(cart_id == {"STAR SOLDIER"} )              	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 10 - Star Soldier
 				if(cart_id == {"MAPPY", 56'h00000000000000} ) 	begin sram_quirk <= 1; memory_remap_quirk <= 1; end // Famicom Mini 08 - Mappy
+				if(cart_id == {"POKEMON EMER"} ) 	        begin gpio_quirk <= 1;                          end // POKEMON Emerald  - All regions
+				if(cart_id == {"POKEMON RUBY"} ) 	        begin gpio_quirk <= 1;                          end // POKEMON Ruby     - All regions
+				if(cart_id == {"POKEMON SAPP"} ) 	        begin gpio_quirk <= 1;                          end // POKEMON Sapphire - All regions
+				if(cart_id == {"BOKUTAI", 40'h0000000000} ) 	begin gpio_quirk <= 1; solar_quirk <= 1;        end // Boktai 1         - JP
+				if(cart_id == {"BOKTAI", 48'h000000000000} ) 	begin gpio_quirk <= 1; solar_quirk <= 1;        end // Boktai 1         - US/EU
+				if(cart_id == {"ZOKTAI", 48'h000000000000} ) 	begin gpio_quirk <= 1; solar_quirk <= 1;        end // Boktai 2         - JP
+				if(cart_id == {"BOKTAI2", 40'h0000000000} ) 	begin gpio_quirk <= 1; solar_quirk <= 1;        end // Boktai 2         - US/EU
+				if(cart_id == {"BOKTAI3", 40'h0000000000} ) 	begin gpio_quirk <= 1; solar_quirk <= 1;        end // Boktai 3         - JP
+				if(cart_id == {"WARIOTWISTED"} ) 	        begin gpio_quirk <= 1;                          end // WarioWareTwisted - US
+				if(cart_id == {"MAWARUWARIO", 8'h00} ) 	        begin gpio_quirk <= 1;                          end // WarioWareTwisted - JP
+				if(cart_id == {"HAPPYPANECHU"} ) 	        begin tilt_quirk <= 1;                          end // Koro Koro Puzzle - JP
+				if(cart_id == {"YOSHI'S U/G", 8'h00} ) 	        begin tilt_quirk <= 1;                          end // Yoshi Gravi      - JP/EU
+				if(cart_id == {"YOSHI TOPSY", 8'h00} ) 	        begin tilt_quirk <= 1;                          end // Yoshi Topsy      - US
+				if(cart_id == {"SENNENKAZOKU"} ) 	        begin gpio_quirk <= 1;                          end // Sennen Kazoku    - JP
+				if(cart_id == {"ROCKEXE4.5RO"} ) 	        begin gpio_quirk <= 1;                          end // Rockman EXE 4.5  - JP
 			end
 		end
 	end
@@ -733,7 +772,7 @@ sdram sdram
 	.ch3_din(bram_dout),
 	.ch3_dout(sdr_bram_din),
 	.ch3_req(bram_req & sdram_en),
-	.ch3_rnw(~bk_loading),
+	.ch3_rnw(~bk_loading || extra_data_addr),
 	.ch3_ready(sdr_bram_ack)
 );
 
@@ -776,9 +815,9 @@ ddram ddram
 	.ch3_din(bram_dout),
 	.ch3_dout(ddr_bram_din),
 	.ch3_req(bram_req & ~sdram_en),
-	.ch3_rnw(~bk_loading),
+	.ch3_rnw(~bk_loading || extra_data_addr),
 	.ch3_ready(ddr_bram_ack),
-	
+
 	.ch4_addr({ss_addr, 1'b0}),
 	.ch4_din(ss_din),
 	.ch4_dout(ss_dout),
@@ -787,9 +826,12 @@ ddram ddram
 	.ch4_ready(ss_ack)
 );
 
+wire [127:0] time_din_h = {32'd0, time_din, "RT"};
 wire [15:0] bram_dout;
 wire [15:0] bram_din = sdram_en ? sdr_bram_din : ddr_bram_din;
 wire        bram_ack = sdram_en ? sdr_bram_ack : ddr_bram_ack;
+assign sd_buff_din = extra_data_addr ? (time_din_h[{sd_buff_addr[2:0], 4'b0000} +: 16]) : bram_buff_out;
+wire [15:0] bram_buff_out;
 
 dpram #(8,16) bram
 (
@@ -801,21 +843,25 @@ dpram #(8,16) bram
 	.q_a(bram_dout),
 
 	.address_b(sd_buff_addr),
-	.wren_b(sd_buff_wr),
+	.wren_b(sd_buff_wr && ~extra_data_addr),
 	.data_b(sd_buff_dout),
-	.q_b(sd_buff_din)
+	.q_b(bram_buff_out)
 );
 
 reg [7:0] bram_addr;
 reg bram_tx_start;
 reg bram_tx_finish;
 reg bram_req;
+
 always @(posedge clk_sys) begin
 	reg state;
 
 	bram_req <= 0;
 
-	if(~bram_tx_start) {bram_addr, state, bram_tx_finish} <= 0;
+	if (extra_data_addr && bram_tx_start) begin
+		if (~&bram_addr)
+			bram_tx_finish <= 1;
+	end else if(~bram_tx_start) {bram_addr, state, bram_tx_finish} <= 0;
 	else if(~bram_tx_finish) begin
 		if(!state) begin
 			bram_req <= 1;
@@ -992,8 +1038,8 @@ always @(posedge clk_sys) begin
    end
    else begin
       shadercolors = 0;
-      desatcolors  = status[26:24] - 4;
-   end		
+      desatcolors  = status[25:24];
+   end
 end
 
 video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
@@ -1027,16 +1073,23 @@ reg  bk_ena      = 0;
 reg  bk_pending  = 0;
 reg  bk_loading  = 0;
 
+reg [7:0] bk_rtc_count = 0;
+reg bk_record_rtc = 0;
+
+wire [16:0] sd_addr_comb = {sd_lba[8:0], sd_buff_addr[7:0]};
+
+wire extra_sv_data = use_img && (save_sz < (img_size[17:9] - 1'd1));
+wire extra_data_addr = sd_lba[8:0] > save_sz;
 
 always @(posedge clk_sys) begin
 	if (bk_write)      bk_pending <= 1;
 	else if (bk_state) bk_pending <= 0;
 end
+reg use_img;
+reg [8:0] save_sz;
 
-reg [7:0] save_sz;
-always @(posedge clk_sys) begin
+always @(posedge clk_sys) begin : size_block
 	reg old_downloading;
-	reg use_img;
 
 	old_downloading <= cart_download;
 	if(~old_downloading & cart_download) {use_img, save_sz} <= 0;
@@ -1046,12 +1099,15 @@ always @(posedge clk_sys) begin
 		if(save_sram)   save_sz <= save_sz | 8'h3F;
 		if(save_flash)  save_sz <= save_sz | {flash_1m, 7'h7F};
 	end
-	
+
 	if(img_mounted && img_size && !img_readonly) begin
 		use_img <= 1;
-		save_sz <= img_size[16:9] - 1'd1;
+		if (!(img_size[17:9] & (img_size[17:9] - 9'd1))) // Power of two
+			save_sz <= img_size[17:9] - 1'd1;
+		else                                             // Assume one extra sector of RTC data
+			save_sz <= img_size[17:9] - 2'd2;
 	end
-	
+
 	bk_ena <= |save_sz;
 end
 
@@ -1073,6 +1129,7 @@ always @(posedge clk_sys) begin
 		bram_tx_start <= 0;
 		state <= 0;
 		sd_lba <= 0;
+		time_dout <= {6'd0, RTC_time, 42'd0};
 		bk_loading <= 0;
 		if(bk_ena & ((~old_load & bk_load) | (~old_save & bk_save) | (~old_save_a & bk_save_a & bk_pending) | (cart_download & img_mounted))) begin
 			bk_state <= 1;
@@ -1093,10 +1150,33 @@ always @(posedge clk_sys) begin
 					bram_tx_start <= 0;
 					state <= 0;
 					sd_lba <= sd_lba + 1'd1;
+
 					// always read max possible size
-					if(&sd_lba[7:0]) bk_state <= 0;
+					if(sd_lba[8:0] == 9'h100) begin
+						bk_record_rtc <= 0;
+						bk_state <= 0;
+						RTC_load <= 0;
+					end
 				end
 		endcase
+
+		if (extra_data_addr) begin
+			if (~|sd_buff_addr && sd_buff_wr && sd_buff_dout == "RT") begin
+				bk_record_rtc <= 1;
+				RTC_load <= 0;
+			end
+		end
+
+		if (bk_record_rtc) begin
+			if (sd_buff_addr < 6 && sd_buff_addr >= 1)
+				time_dout[{sd_buff_addr[2:0] - 3'd1, 4'b0000} +: 16] <= sd_buff_dout;
+
+			if (sd_buff_addr > 5)
+				RTC_load <= 1;
+
+			if (&sd_buff_addr)
+				bk_record_rtc <= 0;
+		end
 	end
 	else begin
 		case(state)
@@ -1112,7 +1192,9 @@ always @(posedge clk_sys) begin
 			2: if(old_ack & ~sd_ack) begin
 					state <= 0;
 					sd_lba <= sd_lba + 1'd1;
-					if(sd_lba[7:0] == save_sz) bk_state <= 0;
+
+					if (sd_lba[8:0] == {1'b0, save_sz} + (has_rtc ? 9'd1 : 9'd0))
+						bk_state <= 0;
 				end
 		endcase
 	end
@@ -1131,13 +1213,13 @@ reg gg_reset;
 reg ioctl_download_1;
 wire gg_active;
 always_ff @(posedge clk_sys) begin
-	
+
    gg_reset <= 0;
    ioctl_download_1 <= ioctl_download;
 	if (ioctl_download && ~ioctl_download_1 && ioctl_index == 255) begin
       gg_reset <= 1;
    end
-   
+
    gg_valid <= 0;
 	if (code_download & ioctl_wr) begin
 		case (ioctl_addr[3:0])
