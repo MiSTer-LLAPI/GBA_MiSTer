@@ -209,8 +209,8 @@ parameter CONF_STR = {
    "OLM,2XResolution,Off,Background,Sprites,Both;",
 	"O78,Stereo Mix,None,25%,50%,100%;",
 	"-;",
-	"OM,Serial Mode,Off,LLAPI;",
-	"OL,Fast Forward,Off,On;",
+	"oU,Serial Mode,Off,LLAPI;",
+	"oV,Fast Forward,Off,On;",
 	"OEF,Storage,Auto,SDRAM,DDR3;",
 	"D5O5,Pause when OSD is open,Off,On;",
 	"H2OG,Turbo,Off,On;",
@@ -425,13 +425,13 @@ always @(posedge clk_sys) begin : ffwd
 	if ((last_ffw & ~joy[10])) begin // 100mhz clock, 0.2 seconds
 		ff_was_held <= 0;
 
-		if (ff_count < 10000000 && ~ff_was_held && status[21]) begin
+		if (ff_count < 10000000 && ~ff_was_held && status[63]) begin
 			ff_was_held <= 1;
 			ff_latch <= 1;
 		end
 	end
 
-	fast_forward <= (joy[10] | ff_latch) & ~force_turbo & status[21];
+	fast_forward <= (joy[10] | ff_latch) & ~force_turbo & status[63];
 	pause <= force_pause | (status[5] & OSD_STATUS & ~status[27]); // pause from "sync to core" or "pause in osd", but not if rewind capture is on 
 	cpu_turbo <= ((status[16] & ~fast_forward) | force_turbo) & ~pause;
 end
@@ -650,7 +650,7 @@ wire [71:0] llapi_analog, llapi_analog2;
 wire [7:0]  llapi_type, llapi_type2;
 wire llapi_en, llapi_en2;
 
-wire llapi_select = status[22];
+wire llapi_select = status[62];
 
 wire llapi_latch_o, llapi_latch_o2, llapi_data_o, llapi_data_o2;
 
