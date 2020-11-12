@@ -262,6 +262,8 @@ architecture arch of gba_top is
    signal dma_new_cycles   : std_logic; 
    signal dma_first_cycles : std_logic;
    signal dma_dword_cycles : std_logic;
+   signal dma_toROM        : std_logic;
+   signal dma_init_cycles  : std_logic;
    signal dma_cycles_adrup : std_logic_vector(3 downto 0); 
    
    signal gba_step : std_logic := '0';
@@ -282,6 +284,8 @@ architecture arch of gba_top is
    
    signal hblank_trigger : std_logic;
    signal vblank_trigger : std_logic;
+   signal videodma_start : std_logic;
+   signal videodma_stop  : std_logic;
    
    signal timer0_tick    : std_logic;
    signal timer1_tick    : std_logic;
@@ -755,10 +759,14 @@ begin
       sound_dma_req       => sound_dma_req,
       hblank_trigger      => hblank_trigger,
       vblank_trigger      => vblank_trigger,
+      videodma_start      => videodma_start,
+      videodma_stop       => videodma_stop ,   
       
       dma_new_cycles      => dma_new_cycles,  
       dma_first_cycles    => dma_first_cycles,
       dma_dword_cycles    => dma_dword_cycles,
+      dma_toROM           => dma_toROM,
+      dma_init_cycles     => dma_init_cycles,
       dma_cycles_adrup    => dma_cycles_adrup,
       
       dma_eepromcount     => dma_eepromcount,
@@ -844,6 +852,8 @@ begin
 
       hblank_trigger       => hblank_trigger,
       vblank_trigger       => vblank_trigger,
+      videodma_start       => videodma_start,
+      videodma_stop        => videodma_stop ,   
                         
       VRAM_Lo_addr         => VRAM_Lo_addr,   
       VRAM_Lo_datain       => VRAM_Lo_datain, 
@@ -943,6 +953,8 @@ begin
       dma_new_cycles   => dma_new_cycles,  
       dma_first_cycles => dma_first_cycles,
       dma_dword_cycles => dma_dword_cycles,
+      dma_toROM        => dma_toROM,
+      dma_init_cycles  => dma_init_cycles,
       dma_cycles_adrup => dma_cycles_adrup,
       
       IRP_in           => IRPFLags,
