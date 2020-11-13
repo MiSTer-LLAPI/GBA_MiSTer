@@ -203,7 +203,7 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 // 0         1         2         3         4         5         6
 // 0123456789012345678901234567890123456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV0123456789ABCDEFGHIJKLMNOPQRSTUV
-// X XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// X XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX                            X
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -238,7 +238,7 @@ parameter CONF_STR = {
 	"P3,Miscellaneous;",
 	"P3-;",
 	"OJ,Serial Mode,Off,LLAPI;",
-	"o0,Fast Forward,Off,On;",
+	"oV,Fast Forward,Off,On;",
 	"P3OEF,Storage,Auto,SDRAM,DDR3;",
 	"D5P3O5,Pause when OSD is open,Off,On;",
 	"P3OR,Rewind Capture,Off,On;",
@@ -450,13 +450,13 @@ always @(posedge clk_sys) begin : ffwd
 	if ((last_ffw & ~joy[10])) begin // 100mhz clock, 0.2 seconds
 		ff_was_held <= 0;
 
-		if (ff_count < 10000000 && ~ff_was_held && status[32]) begin
+		if (ff_count < 10000000 && ~ff_was_held && status[63]) begin
 			ff_was_held <= 1;
 			ff_latch <= 1;
 		end
 	end
 
-	fast_forward <= (joy[10] | ff_latch) & ~force_turbo & status[32];
+	fast_forward <= (joy[10] | ff_latch) & ~force_turbo & status[63];
 	pause <= force_pause | (status[5] & OSD_STATUS & ~status[27]); // pause from "sync to core" or "pause in osd", but not if rewind capture is on 
 	cpu_turbo <= ((status[16] & ~fast_forward) | force_turbo) & ~pause;
 end
