@@ -425,7 +425,6 @@ architecture arch of gba_gpu_drawer is
    signal busy_modeobj_hd0 : std_logic;
    signal busy_modeobj_hd1 : std_logic;
    
-   signal draw_allmod   : std_logic_vector(7 downto 0);
    signal busy_allmod   : std_logic_vector(7 downto 0);
    
    -- linebuffers
@@ -1499,15 +1498,6 @@ begin
    VRAM_Drawer_addr1 <= VRAM_Drawer_addr_mode2_3_hd1 when (hdmode2x_bg = '1' and BG_Mode = "010") else VRAM_Drawer_addr_mode0_1;
    VRAM_Drawer_addr2 <= VRAM_Drawer_addr_mode0_2 when BG_Mode = "000" else VRAM_Drawer_addr_mode2_2 when ((BG_Mode = "001" or BG_Mode = "010") and hdmode2x_bg = '0') else VRAM_Drawer_addr_mode2_2_hd0 when BG_Mode = "001" or BG_Mode = "010" else VRAM_Drawer_addr_345_Lo;
    VRAM_Drawer_addr3 <= VRAM_Drawer_addr_mode0_3 when BG_Mode = "000" else VRAM_Drawer_addr_mode2_2_hd1 when hdmode2x_bg = '1' else VRAM_Drawer_addr_mode2_3;
-   
-   draw_allmod(0) <= drawline_mode0_0;
-   draw_allmod(1) <= drawline_mode0_1;
-   draw_allmod(2) <= drawline_mode0_2;
-   draw_allmod(3) <= drawline_mode0_3;
-   draw_allmod(4) <= drawline_mode2_2;
-   draw_allmod(5) <= drawline_mode2_3;
-   draw_allmod(6) <= drawline_mode345;
-   draw_allmod(7) <= drawline_obj    ;
 
    busy_allmod(0) <= busy_mode0_0;
    busy_allmod(1) <= busy_mode0_1;
@@ -2479,26 +2469,30 @@ begin
             if (interframe_blend = "10") then -- by toggling only when option is on, even/odd picture can be selected with multiple switch on/off
                frameselect            <= not frameselect;
             end if;
-         elsif (drawline = '1') then
+         elsif (hblank_trigger_1 = '1') then
          
             -- background
-            if (mosaik_vcnt_bg < unsigned(REG_MOSAIC_BG_Mosaic_V_Size)) then
-               mosaik_vcnt_bg <= mosaik_vcnt_bg + 1;
-            else
+            if (mosaik_vcnt_bg >= unsigned(REG_MOSAIC_BG_Mosaic_V_Size)) then
                mosaik_vcnt_bg        <= 0;
-               linecounter_mosaic_bg <= to_integer(linecounter);
+               if (linecounter < 159) then
+                  linecounter_mosaic_bg <= to_integer(linecounter) + 1;
+               end if;
                mosaic_ref2_x         <= ref2_x;
                mosaic_ref2_y         <= ref2_y;
                mosaic_ref3_x         <= ref3_x;
                mosaic_ref3_y         <= ref3_y;
+            else
+               mosaik_vcnt_bg <= mosaik_vcnt_bg + 1;
             end if;
             
             -- sprite
-            if (mosaik_vcnt_obj < unsigned(REG_MOSAIC_OBJ_Mosaic_V_Size)) then
-               mosaik_vcnt_obj <= mosaik_vcnt_obj + 1;
-            else
+            if (mosaik_vcnt_obj >= unsigned(REG_MOSAIC_OBJ_Mosaic_V_Size)) then
                mosaik_vcnt_obj        <= 0;
-               linecounter_mosaic_obj <= to_integer(linecounter);
+               if (linecounter < 159) then
+                  linecounter_mosaic_obj <= to_integer(linecounter) + 1;
+               end if;
+            else
+               mosaik_vcnt_obj <= mosaik_vcnt_obj + 1;
             end if;
 
          end if;
