@@ -183,7 +183,9 @@ assign AUDIO_MIX = status[8:7];
 assign LED_USER  = cart_download | bk_pending;
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
+//LLAPI: OSD combinaison
 assign BUTTONS   = llapi_osd;
+//LLAPI
 assign VGA_SCALER= 0;
 
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
@@ -242,7 +244,10 @@ parameter CONF_STR = {
 	"O78,Stereo Mix,None,25%,50%,100%;",
 	"OK,Spritelimit,Off,On;",	 
 	"o23,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
-        "OM,Serial Mode,Off,LLAPI;",
+	//LLAPI: OSD menu item. swapped NONE with LLAPI. To detect LLAPI, status[22] = 1.
+	//LLAPI: Always double check witht the bits map allocation table to avoid conflicts	
+    "OM,Serial Mode,Off,LLAPI;",
+	//LLAPI
 	"O5,Pause when OSD is open,Off,On;",
 	"- ;",
 	"R0,Reset;",
@@ -717,16 +722,20 @@ wire llapi_latch_o, llapi_latch_o2, llapi_data_o, llapi_data_o2;
 // 4 = RX+   = P2 Latch
 // 5 = RX-   = P2 Data
 
+//connection to USER_OUT port
+
 always_comb begin
 	USER_OUT = 6'b111111;
 	if (llapi_select) begin
 		USER_OUT[0] = llapi_latch_o;
 		USER_OUT[1] = llapi_data_o;
-		USER_OUT[2] = ~(llapi_select & ~OSD_STATUS);
+		USER_OUT[2] = ~(llapi_select & ~OSD_STATUS);//LED on blister
 		USER_OUT[4] = llapi_latch_o2;
 		USER_OUT[5] = llapi_data_o2;
 	end
 end
+
+//Port 1 conf
 
 LLAPI llapi
 (
@@ -742,6 +751,8 @@ LLAPI llapi
 	.LLAPI_TYPE(llapi_type),
 	.LLAPI_EN(llapi_en)
 );
+
+//Port 2 conf
 
 LLAPI llapi2
 (
@@ -776,6 +787,12 @@ end
 // if id is 0, assume there is no controller until a button is pressed
 wire use_llapi = llapi_en && llapi_select && (|llapi_type || llapi_button_pressed);
 wire use_llapi2 = llapi_en2 && llapi_select && (|llapi_type2 || llapi_button_pressed2);
+
+//Controller string provided by core for reference (order is important)
+//Controller specific mapping based on type. More info here : https://docs.google.com/document/d/12XpxrmKYx_jgfEPyw-O2zex1kTQZZ-NSBdLO2RQPRzM/edit
+//llapi_Buttons id are HID id - 1
+
+//Port 1 mapping
 
 // "J1,A,B,L,R,Select,Start,Turbo;",
 
@@ -827,6 +844,8 @@ always_comb begin
 	end
 end
 
+//Assign (DOWN + FIRST BUTTON) Combinaison to bring the OSD up - P1 and P1 ports.
+//TODO : Support long press detection
 wire llapi_osd = (llapi_buttons[26] && llapi_buttons[5] && llapi_buttons[0]) || (llapi_buttons2[26] && llapi_buttons2[5] && llapi_buttons2[0]);
 
 // if LLAPI is enabled, shift USB controllers to next available player slot
