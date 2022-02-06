@@ -19,6 +19,7 @@
 //  with this program; if not, write to the Free Software Foundation, Inc.,
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 //============================================================================
+//LLAPI : llapi.sv needs to be in rtl folder and needs to be declared in file.qip (set_global_assignment -name SYSTEMVERILOG_FILE rtl/llapi.sv)
 
 module emu
 (
@@ -183,7 +184,9 @@ assign AUDIO_MIX = status[8:7];
 assign LED_USER  = cart_download | bk_pending;
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
+//LLAPI: OSD combinaison
 assign BUTTONS   = llapi_osd;
+//LLAPI
 assign VGA_SCALER= 0;
 assign HDMI_FREEZE=0;
 
@@ -263,7 +266,10 @@ parameter CONF_STR = {
 
 	"P3,Miscellaneous;",
 	"P3-;",
+	//LLAPI: OSD menu item. swapped NONE with LLAPI. To detect LLAPI, status[19] = 1.
+	//LLAPI: Always double check witht the bits map allocation table to avoid conflicts	
 	"OJ,Serial Mode,Off,LLAPI;",
+	//LLAPI
 	"oV,Fast Forward,Off,On;",
 	"P3OEF,Storage,Auto,SDRAM,DDR3;",
 	"D5P3O5,Pause when OSD is open,Off,On;",
@@ -374,9 +380,10 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
    .joystick_l_analog_0(joystick_analog_0)
 );
 
+//LLAPI
 assign joy_unmod = joy_usb | joy_ll_a | joy_ll_b;
 assign joy = joy_unmod[12] ? 16'b0 : joy_unmod;
-
+//LLAPI
 //////////////////////////  ROM DETECT  /////////////////////////////////
 
 reg code_download, bios_download, cart_download;
@@ -696,16 +703,19 @@ wire llapi_latch_o, llapi_latch_o2, llapi_data_o, llapi_data_o2;
 // 4 = RX+   = P2 Latch
 // 5 = RX-   = P2 Data
 
+//Connection to USER_OUT port
 always_comb begin
 	USER_OUT = 6'b111111;
 	if (llapi_select) begin
 		USER_OUT[0] = llapi_latch_o;
 		USER_OUT[1] = llapi_data_o;
-		USER_OUT[2] = ~(llapi_select & ~OSD_STATUS);
+		USER_OUT[2] = ~(llapi_select & ~OSD_STATUS);//LED on Blister
 		USER_OUT[4] = llapi_latch_o2;
 		USER_OUT[5] = llapi_data_o2;
 	end
 end
+
+//Port 1 conf
 
 LLAPI llapi
 (
@@ -722,6 +732,8 @@ LLAPI llapi
 	.LLAPI_EN(llapi_en)
 );
 
+//Port 2 conf
+
 LLAPI llapi2
 (
 	.CLK_50M(CLK_50M),
@@ -736,6 +748,12 @@ LLAPI llapi2
 	.LLAPI_TYPE(llapi_type2),
 	.LLAPI_EN(llapi_en2)
 );
+
+//Controller string provided by core for reference (order is important)
+//Controller specific mapping based on type. More info here : https://docs.google.com/document/d/12XpxrmKYx_jgfEPyw-O2zex1kTQZZ-NSBdLO2RQPRzM/edit
+//llapi_Buttons id are HID id - 1
+
+//Port 1 mapping
 
 // "J1,A,B,L,R,Select,Start,Turbo;",
 
@@ -763,6 +781,8 @@ always_comb begin
 	end
 end
 
+//Port 2 mapping
+
 wire [15:0] joy_ll_b;
 always_comb begin
 	// map for saturn controller
@@ -786,6 +806,9 @@ always_comb begin
 		};
 	end
 end
+
+//Assign (DOWN + FIRST BUTTON) Combinaison to bring the OSD up - P1 and P1 ports.
+//TODO : Support long press detection
 
 wire llapi_osd = (llapi_buttons[26] && llapi_buttons[5] && llapi_buttons[0]) || (llapi_buttons2[26] && llapi_buttons2[5] && llapi_buttons2[0]);
 
