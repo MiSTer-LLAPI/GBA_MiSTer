@@ -198,10 +198,6 @@ assign FB_WIDTH   = 12'd480;
 assign FB_HEIGHT  = 12'd320;
 assign FB_STRIDE  = 0;
 assign FB_FORCE_BLANK = 0;
-assign FB_PAL_CLK = 0;
-assign FB_PAL_ADDR= 0;
-assign FB_PAL_DOUT= 0;
-assign FB_PAL_WR  = 0;
 
 
 ///////////////////////  CLOCK/RESET  ///////////////////////////////////
@@ -292,7 +288,7 @@ parameter CONF_STR = {
 	"Save to state 3,",
 	"Restore state 3,",
 	"Save to state 4,",
-	"Restore state 4;",
+	"Restore state 4,",
 	"Rewinding...;",
 	"V,v",`BUILD_DATE
 };
