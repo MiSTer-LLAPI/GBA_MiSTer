@@ -54,6 +54,7 @@ module emu
 	output        VGA_F1,
 	output [1:0]  VGA_SL,
 	output        VGA_SCALER, // Force VGA scaler
+	output        VGA_DISABLE,
 
 	input  [11:0] HDMI_WIDTH,
 	input  [11:0] HDMI_HEIGHT,
@@ -177,18 +178,22 @@ module emu
 
 assign ADC_BUS  = 'Z;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+//LLAPI : ignore this line
+//assign USER_OUT = '1;
+//LLAPI
 
 assign AUDIO_S   = 1;
 assign AUDIO_MIX = status[8:7];
 
-assign LED_USER  = cart_download | bk_pending;
-assign LED_DISK  = 0;
-assign LED_POWER = 0;
+assign LED_USER    = cart_download | bk_pending;
+assign LED_DISK    = 0;
+assign LED_POWER   = 0;
 //LLAPI: OSD combinaison
 assign BUTTONS   = llapi_osd;
 //LLAPI
-assign VGA_SCALER= 0;
-assign HDMI_FREEZE=0;
+assign VGA_SCALER  = 0;
+assign VGA_DISABLE = 0;
+assign HDMI_FREEZE = 0;
 
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 
@@ -222,14 +227,14 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 // 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// X XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XXXXXXXX                       X
+// X XXXXXXXXXRXXXXXXXXXXXXXXXXXXXX XXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
 	"GBA;SS3E000000:80000;",
 	"FS,GBA,Load,300C0000;",
-   "-;",
-   "C,Cheats;",
+	"-;",
+	"C,Cheats;",
 	"H1O6,Cheats Enabled,Yes,No;",
 	"-;",
 	"D0RC,Reload Backup RAM;",
@@ -240,19 +245,22 @@ parameter CONF_STR = {
 	"o56,Savestate Slot,1,2,3,4;",
 	"h4H3RH,Save state (Alt-F1);",
 	"h4H3RI,Restore state (F1);",
-	"h4H3-;",
-
+	"-;",
 	"P1,Video & Audio;",
 	"P1-;",
 	"P1o01,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-	"P1O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",	
-	"P1O78,Stereo Mix,None,25%,50%,100%;",
-	"P1OLM,2XResolution,Off,Background,Sprites,Both;",
-	"P1O9A,Flickerblend,Off,Blend,30Hz;",
-	"P1OOQ,Modify Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4,75%,50%,25%;",
-	"P1OK,Spritelimit,Off,On;",	 
-	"P1o7,Sync core to video,On,Off;",
+	"P1O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"P1o23,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
+	"P1-;",
+	"P1OOQ,Modify Colors,Off,GBA 2.2,GBA 1.6,NDS 1.6,VBA 1.4,75%,50%,25%;",
+	"P1-;",
+	"P1o7,Sync core to video,On,Off;",
+	"P1O9A,Flickerblend,Off,Blend,30Hz;",
+	"P1OLM,2XResolution,Off,Background,Sprites,Both;",
+	"P1OK,Spritelimit,Off,On;",	
+	"P1-;",
+	"P1O78,Stereo Mix,None,25%,50%,100%;",
+	"P1OJ,Fast Forward Sound,On,Off;",
 
 	"P2,Hardware;",
 	"P2-;",
@@ -266,10 +274,14 @@ parameter CONF_STR = {
 	//LLAPI: Always double check witht the bits map allocation table to avoid conflicts	
 	"OJ,Serial Mode,Off,LLAPI;",
 	//LLAPI
-	"oV,Fast Forward,Off,On;",
+	"P3-;",
 	"P3OEF,Storage,Auto,SDRAM,DDR3;",
 	"D5P3O5,Pause when OSD is open,Off,On;",
 	"P3OR,Rewind Capture,Off,On;",
+	"P3-;",
+	"P3-,Only Romhacks or Crash!;",
+	"P3o8,GPIO HACK(RTC+Rumble),Off,On;",
+	"P3o9A,Underclock CPU,0,1,2,3;",
 
 	"- ;",
 	"R0,Reset;",
@@ -314,14 +326,16 @@ wire [15:0] ioctl_dout;
 wire        ioctl_wr;
 wire  [7:0] ioctl_index;
 reg         ioctl_wait = 0;
+wire [15:0] joy_rumble;
 
+//LLAPI
 wire [15:0] joy_usb;
-
+//LLAPI
 wire [15:0] joy;
 wire [15:0] joy_unmod;
 wire [10:0] ps2_key;
-wire [21:0] gamma_bus;
 
+wire [21:0] gamma_bus;
 wire [15:0] sdram_sz;
 
 wire [15:0] joystick_analog_0;
@@ -338,7 +352,11 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.buttons(buttons),
 	.forced_scandoubler(forced_scandoubler),
 
+	//.joystick_0(joy_unmod),
+	//LLAPI
 	.joystick_0(joy_usb),
+   //LLAPI
+	.joystick_0_rumble(joy_rumble),
 	.ps2_key(ps2_key),
 
 	.status(status),
@@ -378,8 +396,9 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 
 //LLAPI
 assign joy_unmod = joy_usb | joy_ll_a | joy_ll_b;
-assign joy = joy_unmod[12] ? 16'b0 : joy_unmod;
 //LLAPI
+assign joy = joy_unmod[12] ? 16'b0 : joy_unmod;
+
 //////////////////////////  ROM DETECT  /////////////////////////////////
 
 reg code_download, bios_download, cart_download;
@@ -487,14 +506,14 @@ always @(posedge clk_sys) begin : ffwd
 	if ((last_ffw & ~joy[10])) begin // 100mhz clock, 0.2 seconds
 		ff_was_held <= 0;
 
-		if (ff_count < 10000000 && ~ff_was_held && status[63]) begin
+		if (ff_count < 10000000 && ~ff_was_held) begin
 			ff_was_held <= 1;
 			ff_latch <= 1;
 		end
 	end
 
-	fast_forward <= (joy[10] | ff_latch) & ~force_turbo & status[63];
-	pause <= force_pause | (status[5] & OSD_STATUS & ~status[27]); // pause from "sync to core" or "pause in osd", but not if rewind capture is on 
+	fast_forward <= (joy[10] | ff_latch) & ~force_turbo;
+	pause <= force_pause | (status[5] & OSD_STATUS & ~status[27]); // pause from "sync to core" or "pause in osd", but not if rewind capture is on
 	cpu_turbo <= ((status[16] & ~fast_forward) | force_turbo) & ~pause;
 end
 
@@ -503,7 +522,19 @@ wire [79:0] time_din;
 assign time_din[42 + 32 +: 80 - (42 + 32)] = '0;
 
 wire has_rtc;
+wire cart_rumble;
 reg RTC_load = 0;
+
+reg [7:0] rumble_reg = 0;
+
+always @(posedge clk_sys) begin
+	rumble_reg <= (cart_rumble ? 8'd128 : 8'd0);
+end
+
+assign joy_rumble = {8'd0, rumble_reg};
+
+wire [15:0] GBA_AUDIO_L;
+wire [15:0] GBA_AUDIO_R;
 
 gba_top
 #(
@@ -520,11 +551,12 @@ gba
 (
 	.clk100(clk_sys),
 	.GBA_on(~reset && ~romcopy_active),  // switching from off to on = reset
-	.GBA_lockspeed(~fast_forward),    // 1 = 100% speed, 0 = max speed
+	.GBA_lockspeed(~fast_forward),       // 1 = 100% speed, 0 = max speed
 	.GBA_cputurbo(cpu_turbo),
 	.GBA_flash_1m(flash_1m),          // 1 when string "FLASH1M_V" is anywhere in gamepak
 	.CyclePrecalc(pause ? 16'd0 : 16'd100), // 100 seems to be ok to keep fullspeed for all games
-	.MaxPakAddr(last_addr[26:2]),     // max byte address that will contain data, required for buggy games that read behind their own memory, e.g. zelda minish cap
+	.Underclock(status[42:41]),
+   .MaxPakAddr(last_addr[26:2]),     // max byte address that will contain data, required for buggy games that read behind their own memory, e.g. zelda minish cap
 	.CyclesMissing(),                 // debug only for speed measurement, keep open
 	.CyclesVsyncSpeed(),              // debug only for speed measurement, keep open
 	.SramFlashEnable(~sram_quirk),
@@ -537,7 +569,7 @@ gba
    .hdmode2x_bg(status[21]),
    .hdmode2x_obj(status[22]),
    .shade_mode(shadercolors),
-	.specialmodule(gpio_quirk),
+	.specialmodule(gpio_quirk | status[40]),
 	.solar_in(status[31:29]),
 	.tilt(tilt_quirk),
    .rewind_on(status[27]),
@@ -601,6 +633,7 @@ gba
 	.KeyL(joy[6]),
 	.AnalogTiltX(joystick_analog_0[7:0]),
 	.AnalogTiltY(joystick_analog_0[15:8]),
+	.Rumble(cart_rumble),
 
 	.pixel_out_addr(pixel_addr),      // integer range 0 to 38399;       -- address for framebuffer
 	.pixel_out_data(pixel_data),      // RGB data for framebuffer
@@ -614,9 +647,12 @@ gba
    .largeimg_newframe(FB_VBL),
    .largeimg_singlebuf(FB_LL),
 
-	.sound_out_left(AUDIO_L),
-	.sound_out_right(AUDIO_R)
+	.sound_out_left(GBA_AUDIO_L),
+	.sound_out_right(GBA_AUDIO_R)
 );
+
+assign AUDIO_L = (fast_forward && status[19]) ? 16'd0 : GBA_AUDIO_L;
+assign AUDIO_R = (fast_forward && status[19]) ? 16'd0 : GBA_AUDIO_R;
 
 ////////////////////////////  QUIRKS  //////////////////////////////////
 
@@ -643,39 +679,74 @@ always @(posedge clk_sys) begin
 			if(rom_addr[3:0] >= 12) cart_id[{4'd14 - rom_addr[3:0], 3'd0} +:16] <= {rom_dout[7:0],rom_dout[15:8]};
 		end
 		if(rom_addr == 'hB0) begin
-			if(cart_id[31:8] == "AR8") begin sram_quirk <= 1;                                             end // Rocky US
-			if(cart_id[31:8] == "ARO") begin sram_quirk <= 1;                                             end // Rocky EU
-			if(cart_id[31:8] == "ALG") begin sram_quirk <= 1;                                             end // Dragon Ball Z - The Legacy of Goku
-			if(cart_id[31:8] == "ALF") begin sram_quirk <= 1;                                             end // Dragon Ball Z - The Legacy of Goku II
-			if(cart_id[31:8] == "BLF") begin sram_quirk <= 1;                                             end // 2 Games in 1 - Dragon Ball Z - The Legacy of Goku I & II
-			if(cart_id[31:8] == "BDB") begin sram_quirk <= 1;                                             end // Dragon Ball Z - Taiketsu
-			if(cart_id[31:8] == "BG3") begin sram_quirk <= 1;                                             end // Dragon Ball Z - Buu's Fury
-			if(cart_id[31:8] == "BDV") begin sram_quirk <= 1;                                             end // Dragon Ball Z - Advanced Adventure
-			if(cart_id[31:8] == "A2Y") begin sram_quirk <= 1;                                             end // Top Gun - Combat Zones
-			if(cart_id[31:8] == "AI2") begin sram_quirk <= 1;                                             end // Iridion II
-			if(cart_id[31:8] == "BPE") begin gpio_quirk <= 1;                                             end // POKEMON Emerald
-			if(cart_id[31:8] == "AXV") begin gpio_quirk <= 1;                                             end // POKEMON Ruby
-			if(cart_id[31:8] == "AXP") begin gpio_quirk <= 1;                                             end // POKEMON Sapphire
-			if(cart_id[31:8] == "RZW") begin gpio_quirk <= 1;                                             end // WarioWare Twisted
-			if(cart_id[31:8] == "BKA") begin gpio_quirk <= 1;                                             end // Sennen Kazoku
-			if(cart_id[31:8] == "BR4") begin gpio_quirk <= 1;                                             end // Rockman EXE 4.5
-			if(cart_id[31:8] == "BHG") begin                                           sprite_quirk <= 1; end // Gunstar Super Heroes
-			if(cart_id[31:8] == "BGX") begin                                           sprite_quirk <= 1; end // Gunstar Super Heroes
-			if(cart_id[31:24] == "K")  begin tilt_quirk <= 1;                                             end // All tilt sensor games
-			if(cart_id[31:24] == "U")  begin gpio_quirk <= 1; solar_quirk <= 1;                           end // All solar sensor games
-			if(cart_id[31:24] == "F")  begin
-				sram_quirk <= 1; memory_remap_quirk <= 1;                                    // All Classic NES / Famicom Mini games
-				if(cart_id == "FSDJ" ) begin                          sprite_quirk <= 1; end // Famicom Mini 30 - SD Gundam World - Gachapon Senshi Scramble Wars
-				if(cart_id == "FADJ" ) begin                          sprite_quirk <= 1; end // Famicom Mini 29 - Akumajou Dracula
-				if(cart_id == "FTUJ" ) begin memory_remap_quirk <= 0; sprite_quirk <= 1; end // Famicom Mini 28 - Famicom Tantei Club Part II - Ushiro ni Tatsu Shoujo - Zen, Kouhen
-				if(cart_id == "FTKJ" ) begin memory_remap_quirk <= 0; sprite_quirk <= 1; end // Famicom Mini 27 - Famicom Tantei Club - Kieta Koukeisha - Zen, Kouhen
-				if(cart_id == "FFMJ" ) begin memory_remap_quirk <= 0; sprite_quirk <= 1; end // Famicom Mini 26 - Famicom Mukashibanashi - Shin Onigashima - Zen, Kouhen
-				if(cart_id == "FLBJ" ) begin memory_remap_quirk <= 0; sprite_quirk <= 1; end // Famicom Mini 25 - The Legend of Zelda 2 - Link no Bouken
-				if(cart_id == "FPTJ" ) begin memory_remap_quirk <= 0; sprite_quirk <= 1; end // Famicom Mini 24 - Hikari Shinwa - Palthena no Kagami
-				if(cart_id == "FMRJ" ) begin memory_remap_quirk <= 0; sprite_quirk <= 1; end // Famicom Mini 23 - Metroid
-				if(cart_id == "FNMJ" ) begin memory_remap_quirk <= 0; sprite_quirk <= 1; end // Famicom Mini 22 - Nazo no Murasame Jou
-				if(cart_id == "FM2J" ) begin                          sprite_quirk <= 1; end // Famicom Mini 21 - Super Mario Bros. 2
-			end
+			if(cart_id[31:8] == "AR8" ) begin sram_quirk <= 1;                                             end // Rocky US
+			if(cart_id[31:8] == "ARO" ) begin sram_quirk <= 1;                                             end // Rocky EU
+			if(cart_id[31:8] == "ALG" ) begin sram_quirk <= 1;                                             end // Dragon Ball Z - The Legacy of Goku
+			if(cart_id[31:8] == "ALF" ) begin sram_quirk <= 1;                                             end // Dragon Ball Z - The Legacy of Goku II
+			if(cart_id[31:8] == "BLF" ) begin sram_quirk <= 1;                                             end // 2 Games in 1 - Dragon Ball Z - The Legacy of Goku I & II
+			if(cart_id[31:8] == "BDB" ) begin sram_quirk <= 1;                                             end // Dragon Ball Z - Taiketsu
+			if(cart_id[31:8] == "BG3" ) begin sram_quirk <= 1;                                             end // Dragon Ball Z - Buu's Fury
+			if(cart_id[31:8] == "BDV" ) begin sram_quirk <= 1;                                             end // Dragon Ball Z - Advanced Adventure
+			if(cart_id[31:8] == "A2Y" ) begin sram_quirk <= 1;                                             end // Top Gun - Combat Zones
+			if(cart_id[31:8] == "AI2" ) begin sram_quirk <= 1;                                             end // Iridion II
+			if(cart_id[31:8] == "BPE" ) begin gpio_quirk <= 1;                                             end // POKEMON Emerald
+			if(cart_id[31:8] == "AXV" ) begin gpio_quirk <= 1;                                             end // POKEMON Ruby
+			if(cart_id[31:8] == "AXP" ) begin gpio_quirk <= 1;                                             end // POKEMON Sapphire
+			if(cart_id[31:8] == "RZW" ) begin gpio_quirk <= 1;                                             end // WarioWare Twisted
+			if(cart_id[31:8] == "BKA" ) begin gpio_quirk <= 1;                                             end // Sennen Kazoku
+			if(cart_id[31:8] == "BR4" ) begin gpio_quirk <= 1;                                             end // Rockman EXE 4.5
+			if(cart_id[31:8] == "V49" ) begin gpio_quirk <= 1;                                             end // Drill Dozer
+			if(cart_id[31:8] == "BHG" ) begin                                           sprite_quirk <= 1; end // Gunstar Super Heroes
+			if(cart_id[31:8] == "BGX" ) begin                                           sprite_quirk <= 1; end // Gunstar Super Heroes
+			if(cart_id[31:8] == "KHP" ) begin tilt_quirk <= 1;                                             end // Koro Koro Puzzle JP
+			if(cart_id[31:8] == "KYG" ) begin tilt_quirk <= 1;                                             end // Yoshi's Topsy-Turvy
+			if(cart_id[31:8] == "U3I" ) begin gpio_quirk <= 1; solar_quirk <= 1;                           end // Boktai 1
+			if(cart_id[31:8] == "U32" ) begin gpio_quirk <= 1; solar_quirk <= 1;                           end // Boktai 2
+			if(cart_id[31:8] == "U33" ) begin gpio_quirk <= 1; solar_quirk <= 1;                           end // Boktai 3
+			if(cart_id       == "FBME") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series Bomberman
+			if(cart_id       == "FADE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series Castlevania
+			if(cart_id       == "FDKE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series Donkey Kong
+			if(cart_id       == "FDME") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series DR. MARIO
+			if(cart_id       == "FEBE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series EXCITEBIKE
+			if(cart_id       == "FICE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series ICE CLIMBER
+			if(cart_id       == "FMRE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series NES METROID
+			if(cart_id       == "FP7E") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series PAC-MAN
+			if(cart_id       == "FSME") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series SUPER MARIO Bros
+			if(cart_id       == "FZLE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series The Legend of Zelda
+			if(cart_id       == "FXVE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series XEVIOUS
+			if(cart_id       == "FLBE") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Classic NES Series Zelda II - The Adventure of Link
+			if(cart_id       == "FSRJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini - Dai-2-ji Super Robot Taisen (Japan) (Promo)
+			if(cart_id       == "FGZJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini - Kidou Senshi Z Gundam - Hot Scramble (Japan) (Promo)
+			if(cart_id       == "FSDJ") begin sram_quirk <= 1; memory_remap_quirk <= 1; sprite_quirk <= 1; end // Famicom Mini 30 - SD Gundam World - Gachapon Senshi Scramble Wars
+			if(cart_id       == "FADJ") begin sram_quirk <= 1; memory_remap_quirk <= 1; sprite_quirk <= 1; end // Famicom Mini 29 - Akumajou Dracula
+			if(cart_id       == "FTUJ") begin sram_quirk <= 1;                          sprite_quirk <= 1; end // Famicom Mini 28 - Famicom Tantei Club Part II - Ushiro ni Tatsu Shoujo - Zen, Kouhen
+			if(cart_id       == "FTKJ") begin sram_quirk <= 1;                          sprite_quirk <= 1; end // Famicom Mini 27 - Famicom Tantei Club - Kieta Koukeisha - Zen, Kouhen
+			if(cart_id       == "FFMJ") begin sram_quirk <= 1;                          sprite_quirk <= 1; end // Famicom Mini 26 - Famicom Mukashibanashi - Shin Onigashima - Zen, Kouhen
+			if(cart_id       == "FLBJ") begin sram_quirk <= 1;                          sprite_quirk <= 1; end // Famicom Mini 25 - The Legend of Zelda 2 - Link no Bouken
+			if(cart_id       == "FPTJ") begin sram_quirk <= 1;                          sprite_quirk <= 1; end // Famicom Mini 24 - Hikari Shinwa - Palthena no Kagami
+			if(cart_id       == "FMRJ") begin sram_quirk <= 1;                          sprite_quirk <= 1; end // Famicom Mini 23 - Metroid
+			if(cart_id       == "FNMJ") begin sram_quirk <= 1;                          sprite_quirk <= 1; end // Famicom Mini 22 - Nazo no Murasame Jou
+			if(cart_id       == "FM2J") begin sram_quirk <= 1; memory_remap_quirk <= 1; sprite_quirk <= 1; end // Famicom Mini 21 - Super Mario Bros. 2
+			if(cart_id       == "FGGJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 20 - Ganbare Goemon! - Karakuri Douchuu
+			if(cart_id       == "FTWJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 19 - Twin Bee
+			if(cart_id       == "FMKJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 18 - Makaimura
+			if(cart_id       == "FTBJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 17 - Takahashi Meijin no Bouken-jima
+			if(cart_id       == "FDDJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 16 - Dig Dug
+			if(cart_id       == "FDMJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 15 - Dr. Mario
+			if(cart_id       == "FWCJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 14 - Wrecking Crew
+			if(cart_id       == "FVFJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 13 - Balloon Fight
+			if(cart_id       == "FCLJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 12 - Clu Clu Land
+			if(cart_id       == "FMBJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 11 - Mario Bros.
+			if(cart_id       == "FSOJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 10 - Star Soldier
+			if(cart_id       == "FBMJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 09 - Bomber Man
+			if(cart_id       == "FMPJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 08 - Mappy
+			if(cart_id       == "FXVJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 07 - Xevious
+			if(cart_id       == "FPMJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 06 - Pac-Man
+			if(cart_id       == "FZLJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 05 - Zelda no Densetsu 1 - The Hyrule Fantasy
+			if(cart_id       == "FEBJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 04 - Excitebike
+			if(cart_id       == "FICJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 03 - Ice Climber
+			if(cart_id       == "FDKJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 02 - Donkey Kong
+			if(cart_id       == "FSMJ") begin sram_quirk <= 1; memory_remap_quirk <= 1;                    end // Famicom Mini 01 - Super Mario Bros.
 		end
 	end
 end
@@ -808,12 +879,19 @@ end
 
 wire llapi_osd = (llapi_buttons[26] && llapi_buttons[5] && llapi_buttons[0]) || (llapi_buttons2[26] && llapi_buttons2[5] && llapi_buttons2[0]);
 
+////////////////////////////  END LLAPI  ///////////////////////////////////
+
 ////////////////////////////  MEMORY  ///////////////////////////////////
 
 localparam ROM_START = (65536+131072)*4;
 
 reg sdram_en;
-always @(posedge clk_sys) if(reset) sdram_en <= (!status[15:14]) ? |sdram_sz[2:0] : status[14];
+always @(posedge clk_sys) begin
+   if(reset) sdram_en <= (!status[15:14]) ? |sdram_sz[2:0] : status[14];
+   
+   if (sdram_sz[1:0] == 2'b01 && last_addr[25]) sdram_en <= 1'b0; // use ddr3 if game is 32mbyte in size
+   
+end
 
 
 wire [25:2] sdram_addr;
@@ -917,11 +995,57 @@ ddram ddram
 	.ch4_ready(ss_ack),
    
    .ch5_addr({fb_addr, 1'b0}),
-   .ch5_din(fb_din),
-   .ch5_req(fb_req),
+   .ch5_din(gamma_en ? fb_gamma_din : fb_din),
+   .ch5_req(fb_ddr3_req),
    .ch5_ready(fb_ack)
    
 );
+
+// gamma for 2x rendering
+(* ramstyle="no_rw_check" *) reg [7:0] gamma_curve_r1[256];
+(* ramstyle="no_rw_check" *) reg [7:0] gamma_curve_g1[256];
+(* ramstyle="no_rw_check" *) reg [7:0] gamma_curve_b1[256];
+(* ramstyle="no_rw_check" *) reg [7:0] gamma_curve_r2[256];
+(* ramstyle="no_rw_check" *) reg [7:0] gamma_curve_g2[256];
+(* ramstyle="no_rw_check" *) reg [7:0] gamma_curve_b2[256];
+
+wire       gamma_en = gamma_bus[19];
+wire       gamma_wr = gamma_bus[18];
+wire [9:0] gamma_wr_addr = gamma_bus[17:8];
+wire [7:0] gamma_value = gamma_bus[7:0];
+
+reg [63:0] fb_gamma_din;
+reg        fb_ddr3_req;
+
+wire [7:0] gamma_index_r1 = fb_din[ 7: 0];
+wire [7:0] gamma_index_g1 = fb_din[15: 8];
+wire [7:0] gamma_index_b1 = fb_din[23:16];
+
+wire [7:0] gamma_index_r2 = fb_din[39:32];
+wire [7:0] gamma_index_g2 = fb_din[47:40];
+wire [7:0] gamma_index_b2 = fb_din[55:48];
+
+always @(posedge clk_sys) begin
+
+   if (gamma_wr) begin
+      case(gamma_wr_addr[9:8])
+         0: begin gamma_curve_r1[gamma_wr_addr[7:0]] <= gamma_value; gamma_curve_r2[gamma_wr_addr[7:0]] <= gamma_value; end
+         1: begin gamma_curve_g1[gamma_wr_addr[7:0]] <= gamma_value; gamma_curve_g2[gamma_wr_addr[7:0]] <= gamma_value; end
+         2: begin gamma_curve_b1[gamma_wr_addr[7:0]] <= gamma_value; gamma_curve_b2[gamma_wr_addr[7:0]] <= gamma_value; end
+      endcase
+   end
+
+   fb_gamma_din[ 7: 0] <= gamma_curve_r1[gamma_index_r1];
+   fb_gamma_din[15: 8] <= gamma_curve_g1[gamma_index_g1];
+   fb_gamma_din[23:16] <= gamma_curve_b1[gamma_index_b1];
+   fb_gamma_din[31:24] <= 8'd0;
+   fb_gamma_din[39:32] <= gamma_curve_r2[gamma_index_r2];
+   fb_gamma_din[47:40] <= gamma_curve_g2[gamma_index_g2];
+   fb_gamma_din[55:48] <= gamma_curve_b2[gamma_index_b2];
+   fb_gamma_din[63:56] <= 8'd0;
+ 
+   fb_ddr3_req  <= fb_req;                 
+end
 
 ///////////////// copy rom data from ddrram to sdram
 
@@ -1108,7 +1232,7 @@ always @(posedge clk_sys) begin
 
 	bram_req <= 0;
 
-	if (extra_data_addr && bram_tx_start) begin
+	if (sd_lba[8] || (extra_data_addr && bram_tx_start)) begin
 		if (~&bram_addr)
 			bram_tx_finish <= 1;
 	end else if(~bram_tx_start) {bram_addr, state, bram_tx_finish} <= 0;
@@ -1221,8 +1345,8 @@ always @(posedge CLK_VIDEO) begin
 		end
 	end
 
-	// Avoid lost sync by reset
-	if (x == 0 && y == 0)
+	// Avoid lost sync by reset, but force clearing reset at initial core load
+	if (x == 0 && (y == 0 || y == 511))
 		hold_reset <= 1'b0;
 	else if (reset & sync_core)
 		hold_reset <= 1'b1;

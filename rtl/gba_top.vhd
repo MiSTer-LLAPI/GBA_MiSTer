@@ -28,6 +28,7 @@ entity gba_top is
       GBA_cputurbo          : in     std_logic;  -- 1 = cpu free running, all other 16 mhz
       GBA_flash_1m          : in     std_logic;  -- 1 when string "FLASH1M_V" is anywhere in gamepak
       CyclePrecalc          : in     std_logic_vector(15 downto 0); -- 100 seems to be ok to keep fullspeed for all games
+      Underclock            : in     std_logic_vector(1 downto 0);
       MaxPakAddr            : in     std_logic_vector(24 downto 0); -- max byte address that will contain data, required for buggy games that read behind their own memory, e.g. zelda minish cap
       CyclesMissing         : buffer std_logic_vector(31 downto 0); -- debug only for speed measurement, keep open
       CyclesVsyncSpeed      : out    std_logic_vector(31 downto 0); -- debug only for speed measurement, keep open
@@ -106,6 +107,7 @@ entity gba_top is
       KeyL                  : in     std_logic;
       AnalogTiltX           : in     signed(7 downto 0);
       AnalogTiltY           : in     signed(7 downto 0);
+      Rumble                : out    std_logic;
       -- debug interface          
       GBA_BusAddr           : in     std_logic_vector(27 downto 0);
       GBA_BusRnW            : in     std_logic;
@@ -607,7 +609,8 @@ begin
       RTC_timestampOut     => RTC_timestampOut,  
       RTC_savedtimeOut     => RTC_savedtimeOut,  
       RTC_inuse            => RTC_inuse,         
-      
+
+      rumble               => Rumble,
       AnalogX              => AnalogTiltX,
       solar_in             => solar_in
    );
@@ -946,6 +949,8 @@ begin
       wait_cnt_value   => unsigned(REG_WAITCNT),
       wait_cnt_update  => WAITCNT_written,
       
+      Underclock       => Underclock,
+      
       settle           => settle,
       dma_on           => dma_on,
       do_step          => gba_step,
@@ -1238,12 +1243,12 @@ begin
                   case (pixelcnt) is
                      when 0 => 
                         largeimg_out_addr <= "1" & std_logic_vector(to_unsigned(pixeladdress + current_frame * 16#100000#, 25));
-                        largeimg_out_data(31 downto  0) <= x"00" & linebuffer_data( 5 downto  0) & "00" & linebuffer_data(11 downto  6) & "00" & linebuffer_data(17 downto 12) & "00";
-                        largeimg_out_data(63 downto 32) <= x"00" & linebuffer_data(23 downto 18) & "00" & linebuffer_data(29 downto 24) & "00" & linebuffer_data(35 downto 30) & "00";
+                        largeimg_out_data(31 downto  0) <= x"00" & linebuffer_data( 5 downto  0) & linebuffer_data( 5 downto  4) & linebuffer_data(11 downto  6) & linebuffer_data(11 downto 10) & linebuffer_data(17 downto 12) & linebuffer_data(17 downto 16);
+                        largeimg_out_data(63 downto 32) <= x"00" & linebuffer_data(23 downto 18) & linebuffer_data(23 downto 22) & linebuffer_data(29 downto 24) & linebuffer_data(29 downto 28) & linebuffer_data(35 downto 30) & linebuffer_data(35 downto 34);
                      when 1 => 
                         largeimg_out_addr <= "1" & std_logic_vector(to_unsigned(pixeladdress + 512 + current_frame * 16#100000#, 25));
-                        largeimg_out_data(31 downto  0) <= x"00" & linebuffer2_data( 5 downto  0) & "00" & linebuffer2_data(11 downto  6) & "00" & linebuffer2_data(17 downto 12) & "00";
-                        largeimg_out_data(63 downto 32) <= x"00" & linebuffer2_data(23 downto 18) & "00" & linebuffer2_data(29 downto 24) & "00" & linebuffer2_data(35 downto 30) & "00";
+                        largeimg_out_data(31 downto  0) <= x"00" & linebuffer2_data( 5 downto  0) & linebuffer2_data( 5 downto  4) & linebuffer2_data(11 downto  6) & linebuffer2_data(11 downto 10) & linebuffer2_data(17 downto 12) & linebuffer2_data(17 downto 16);
+                        largeimg_out_data(63 downto 32) <= x"00" & linebuffer2_data(23 downto 18) & linebuffer2_data(23 downto 22) & linebuffer2_data(29 downto 24) & linebuffer2_data(29 downto 28) & linebuffer2_data(35 downto 30) & linebuffer2_data(35 downto 34);
                      when others => null;
                   end case;
                   
