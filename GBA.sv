@@ -830,23 +830,52 @@ LLAPI llapi2
 
 // "J1,A,B,L,R,Select,Start,Turbo;",
 
-wire [15:0] joy_ll_a = { 4'd0,
+wire [15:0] joy_ll_a;
+always_comb begin
+	// map for Hori GC controller
+	if ( llapi_type == 9) begin
+		joy_ll_a = { 3'd0, llapi_buttons[4], //save state
+			1'd0,  1'd0, // Rewind Fast-Forward
+			llapi_buttons[5] || llapi_buttons[3],  llapi_buttons[2], // Start Select
+			llapi_buttons[7],  llapi_buttons[6], // RT LT
+			llapi_buttons[0],  llapi_buttons[1], // B A
+			llapi_buttons[27], llapi_buttons[26], llapi_buttons[25], llapi_buttons[24] // d-pad
+		};
+	end else begin
+		joy_ll_a = { 4'd0,
 			llapi_buttons[2],  llapi_buttons[3], // Rewind Fast-Forward
 			llapi_buttons[5],  llapi_buttons[4], // Start Select
 			llapi_buttons[7],  llapi_buttons[6], // RT LT
 			llapi_buttons[0],  llapi_buttons[1], // B A
 			llapi_buttons[27], llapi_buttons[26], llapi_buttons[25], llapi_buttons[24] // d-pad
 		};
+	end
+end
+
 
 //Port 2 mapping
 
-wire [15:0] joy_ll_b = { 4'd0,
+wire [15:0] joy_ll_b;
+always_comb begin
+	// map for Hori GC controller
+	if ( llapi_type2 == 9) begin
+		joy_ll_b = { 3'd0, llapi_buttons2[4], //save state
+			1'd0,  1'd0, // Rewind Fast-Forward
+			llapi_buttons2[5] || llapi_buttons2[3],  llapi_buttons2[2], // Start Select
+			llapi_buttons2[7],  llapi_buttons2[6], // RT LT
+			llapi_buttons2[0],  llapi_buttons2[1], // B A
+			llapi_buttons2[27], llapi_buttons2[26], llapi_buttons2[25], llapi_buttons2[24] // d-pad
+		};
+	end else begin
+		joy_ll_b = { 4'd0,
 			llapi_buttons2[2],  llapi_buttons2[3], // Rewind Fast-Forward
 			llapi_buttons2[5],  llapi_buttons2[4], // Start Select
 			llapi_buttons2[7],  llapi_buttons2[6], // RT LT
 			llapi_buttons2[0],  llapi_buttons2[1], // B A
 			llapi_buttons2[27], llapi_buttons2[26], llapi_buttons2[25], llapi_buttons2[24] // d-pad
 		};
+	end
+end
 
 //Assign (DOWN + START + FIRST BUTTON) Combinaison to bring the OSD up - P1 and P2 ports.
 
