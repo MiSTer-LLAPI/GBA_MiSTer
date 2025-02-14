@@ -235,14 +235,14 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading | hold_
 `include "build_id.v"
 parameter CONF_STR = {
 	"GBA;SS3E000000:80000;",
-	"FS,GBA,Load,300C0000;",
-	"-;",
 	//LLAPI: OSD menu item
 	//LLAPI Always ON
-	"-,<< LLAPI enabled >>;",
-	"-,<< Use USER I/O port >>;",
+	"-,>> LLAPI enabled core    <<;",	
+	"-,>> Connect USER I/O port <<;",
 	"-;",
 	//END LLAPI	
+	"FS,GBA,Load,300C0000;",
+	"-;",
 	"C,Cheats;",
 	"H1O[6],Cheats Enabled,Yes,No;",
 	"-;",
@@ -765,8 +765,6 @@ wire [71:0] llapi_analog, llapi_analog2;
 wire [7:0]  llapi_type, llapi_type2;
 wire llapi_en, llapi_en2;
 
-wire llapi_select = 1'b1;
-
 wire llapi_latch_o, llapi_latch_o2, llapi_data_o, llapi_data_o2;
 
 // Indexes:
@@ -779,14 +777,11 @@ wire llapi_latch_o, llapi_latch_o2, llapi_data_o, llapi_data_o2;
 
 //Connection to USER_OUT port
 always_comb begin
-	USER_OUT = 6'b111111;
-	if (llapi_select) begin
 		USER_OUT[0] = llapi_latch_o;
 		USER_OUT[1] = llapi_data_o;
-		USER_OUT[2] = ~(llapi_select & ~OSD_STATUS);//LED on Blister
+		USER_OUT[2] = OSD_STATUS;//LED on Blister
 		USER_OUT[4] = llapi_latch_o2;
 		USER_OUT[5] = llapi_data_o2;
-	end
 end
 
 //Port 1 conf
@@ -799,7 +794,7 @@ LLAPI llapi
 	.IO_LATCH_OUT(llapi_latch_o),
 	.IO_DATA_IN(USER_IN[1]),
 	.IO_DATA_OUT(llapi_data_o),
-	.ENABLE(llapi_select & ~OSD_STATUS),
+	.ENABLE(~OSD_STATUS),
 	.LLAPI_BUTTONS(llapi_buttons),
 	.LLAPI_ANALOG(llapi_analog),
 	.LLAPI_TYPE(llapi_type),
@@ -816,7 +811,7 @@ LLAPI llapi2
 	.IO_LATCH_OUT(llapi_latch_o2),
 	.IO_DATA_IN(USER_IN[5]),
 	.IO_DATA_OUT(llapi_data_o2),
-	.ENABLE(llapi_select & ~OSD_STATUS),
+	.ENABLE(~OSD_STATUS),
 	.LLAPI_BUTTONS(llapi_buttons2),
 	.LLAPI_ANALOG(llapi_analog2),
 	.LLAPI_TYPE(llapi_type2),
@@ -881,8 +876,6 @@ end
 //Assign (DOWN + START + FIRST BUTTON) Combinaison to bring the OSD up - P1 and P2 ports.
 
 wire llapi_osd = (llapi_buttons[26] && llapi_buttons[5] && llapi_buttons[0]) || (llapi_buttons2[26] && llapi_buttons2[5] && llapi_buttons2[0]);
-
-////////////////////////////  END LLAPI  ///////////////////////////////////
 
 ////////////////////////////  MEMORY  ///////////////////////////////////
 
