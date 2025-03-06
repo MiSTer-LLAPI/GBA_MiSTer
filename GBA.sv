@@ -399,7 +399,7 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 );
 
 //LLAPI
-assign joy_unmod = joy_usb | joy_ll_a | joy_ll_b;
+assign joy_unmod = joy_ll_a | joy_ll_b;
 //LLAPI
 assign joy = joy_unmod[12] ? 16'b0 : joy_unmod;
 
