@@ -19,6 +19,7 @@
 //  with this program; if not, write to the Free Software Foundation, Inc.,
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 //============================================================================
+//LLAPI : llapi.sv needs to be in rtl folder and needs to be declared in file.qip (set_global_assignment -name SYSTEMVERILOG_FILE rtl/llapi.sv)
 
 module emu
 (
@@ -177,7 +178,10 @@ module emu
 
 assign ADC_BUS  = 'Z;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
-assign USER_OUT = '1;
+
+//LLAPI : ignore this line
+//assign USER_OUT = '1;
+//LLAPI
 
 assign AUDIO_S   = 1;
 assign AUDIO_MIX = status[8:7];
@@ -185,7 +189,11 @@ assign AUDIO_MIX = status[8:7];
 assign LED_USER    = cart_download | bk_pending;
 assign LED_DISK    = 0;
 assign LED_POWER   = 0;
-assign BUTTONS     = 0;
+
+//LLAPI: OSD combinaison
+assign BUTTONS   = llapi_osd;
+//LLAPI
+
 assign VGA_SCALER  = 0;
 assign VGA_DISABLE = 0;
 assign HDMI_FREEZE = 0;
@@ -221,6 +229,12 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | bk_loading;
 `include "build_id.v"
 parameter CONF_STR = {
 	"GBA;SS3E000000:80000;",
+	//LLAPI: OSD menu item
+	//LLAPI Always ON
+	"-,>> LLAPI enabled core    <<;",	
+	"-,>> Connect USER I/O port <<;",
+	"-;",
+	//END LLAPI	
 	"FS1,GBA,Load,30080000;",
 	"-;",
 	"C,Cheats;",
@@ -315,6 +329,10 @@ wire  [7:0] ioctl_index;
 reg         ioctl_wait = 0;
 wire [15:0] joy_rumble;
 
+//LLAPI
+wire [15:0] joy_usb;
+//LLAPI
+
 wire [15:0] joy;
 wire [15:0] joy_unmod;
 wire [10:0] ps2_key;
@@ -336,7 +354,10 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.buttons(buttons),
 	.forced_scandoubler(forced_scandoubler),
 
-	.joystick_0(joy_unmod),
+	//LLAPI
+	.joystick_0(joy_usb),
+   //LLAPI
+   
 	.joystick_0_rumble(joy_rumble),
 	.ps2_key(ps2_key),
 
@@ -375,7 +396,131 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
    .joystick_l_analog_0(joystick_analog_0)
 );
 
+//LLAPI
+assign joy_unmod = joy_ll_a | joy_ll_b;
+//LLAPI
+
 assign joy = joy_unmod[12] ? 16'b0 : joy_unmod;
+
+////////////////////////////  LLAPI  ///////////////////////////////////
+
+wire [31:0] llapi_buttons, llapi_buttons2;
+wire [71:0] llapi_analog, llapi_analog2;
+wire [7:0]  llapi_type, llapi_type2;
+wire llapi_en, llapi_en2;
+
+wire llapi_latch_o, llapi_latch_o2, llapi_data_o, llapi_data_o2;
+
+// Indexes:
+// 0 = D+    = P1 Latch
+// 1 = D-    = P1 Data
+// 2 = TX-   = LLAPI Enable
+// 3 = GND_d = N/C
+// 4 = RX+   = P2 Latch
+// 5 = RX-   = P2 Data
+
+//Connection to USER_OUT port
+always_comb begin
+		USER_OUT[0] = llapi_latch_o;
+		USER_OUT[1] = llapi_data_o;
+		USER_OUT[2] = OSD_STATUS;//LED on Blister
+		USER_OUT[4] = llapi_latch_o2;
+		USER_OUT[5] = llapi_data_o2;
+end
+
+//Port 1 conf
+
+LLAPI llapi
+(
+	.CLK_50M(CLK_50M),
+	.LLAPI_SYNC(vbl),
+	.IO_LATCH_IN(USER_IN[0]),
+	.IO_LATCH_OUT(llapi_latch_o),
+	.IO_DATA_IN(USER_IN[1]),
+	.IO_DATA_OUT(llapi_data_o),
+	.ENABLE(~OSD_STATUS),
+	.LLAPI_BUTTONS(llapi_buttons),
+	.LLAPI_ANALOG(llapi_analog),
+	.LLAPI_TYPE(llapi_type),
+	.LLAPI_EN(llapi_en)
+);
+
+//Port 2 conf
+
+LLAPI llapi2
+(
+	.CLK_50M(CLK_50M),
+	.LLAPI_SYNC(vbl),
+	.IO_LATCH_IN(USER_IN[4]),
+	.IO_LATCH_OUT(llapi_latch_o2),
+	.IO_DATA_IN(USER_IN[5]),
+	.IO_DATA_OUT(llapi_data_o2),
+	.ENABLE(~OSD_STATUS),
+	.LLAPI_BUTTONS(llapi_buttons2),
+	.LLAPI_ANALOG(llapi_analog2),
+	.LLAPI_TYPE(llapi_type2),
+	.LLAPI_EN(llapi_en2)
+);
+
+//Controller string provided by core for reference (order is important)
+//Controller specific mapping based on type. More info here : https://docs.google.com/document/d/12XpxrmKYx_jgfEPyw-O2zex1kTQZZ-NSBdLO2RQPRzM/edit
+//llapi_Buttons id are HID id - 1
+
+//Port 1 mapping
+
+// "J1,A,B,L,R,Select,Start,Turbo;",
+
+wire [15:0] joy_ll_a;
+always_comb begin
+	// map for Hori GC controller
+	if ( llapi_type == 9) begin
+		joy_ll_a = { 3'd0, llapi_buttons[4], //save state
+			1'd0,  1'd0, // Rewind Fast-Forward
+			llapi_buttons[5] || llapi_buttons[3],  llapi_buttons[2], // Start Select
+			llapi_buttons[7],  llapi_buttons[6], // RT LT
+			llapi_buttons[0],  llapi_buttons[1], // B A
+			llapi_buttons[27], llapi_buttons[26], llapi_buttons[25], llapi_buttons[24] // d-pad
+		};
+	end else begin
+		joy_ll_a = { 4'd0,
+			llapi_buttons[2],  llapi_buttons[3], // Rewind Fast-Forward
+			llapi_buttons[5],  llapi_buttons[4], // Start Select
+			llapi_buttons[7],  llapi_buttons[6], // RT LT
+			llapi_buttons[0],  llapi_buttons[1], // B A
+			llapi_buttons[27], llapi_buttons[26], llapi_buttons[25], llapi_buttons[24] // d-pad
+		};
+	end
+end
+
+
+//Port 2 mapping
+
+wire [15:0] joy_ll_b;
+always_comb begin
+	// map for Hori GC controller
+	if ( llapi_type2 == 9) begin
+		joy_ll_b = { 3'd0, llapi_buttons2[4], //save state
+			1'd0,  1'd0, // Rewind Fast-Forward
+			llapi_buttons2[5] || llapi_buttons2[3],  llapi_buttons2[2], // Start Select
+			llapi_buttons2[7],  llapi_buttons2[6], // RT LT
+			llapi_buttons2[0],  llapi_buttons2[1], // B A
+			llapi_buttons2[27], llapi_buttons2[26], llapi_buttons2[25], llapi_buttons2[24] // d-pad
+		};
+	end else begin
+		joy_ll_b = { 4'd0,
+			llapi_buttons2[2],  llapi_buttons2[3], // Rewind Fast-Forward
+			llapi_buttons2[5],  llapi_buttons2[4], // Start Select
+			llapi_buttons2[7],  llapi_buttons2[6], // RT LT
+			llapi_buttons2[0],  llapi_buttons2[1], // B A
+			llapi_buttons2[27], llapi_buttons2[26], llapi_buttons2[25], llapi_buttons2[24] // d-pad
+		};
+	end
+end
+
+//Assign (DOWN + START + FIRST BUTTON) Combinaison to bring the OSD up - P1 and P2 ports.
+
+wire llapi_osd = (llapi_buttons[26] && llapi_buttons[5] && llapi_buttons[0]) || (llapi_buttons2[26] && llapi_buttons2[5] && llapi_buttons2[0]);
+
 
 //////////////////////////  ROM DETECT  /////////////////////////////////
 
